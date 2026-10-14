@@ -1,12 +1,12 @@
 {
   "name": "carapace",
-  "description": "Self-contained Claude Code plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, carapace-* subagents, and the live progress bar and /agents-info panel.",
+  "description": "Self-contained Claude Code plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, carapace-* subagents, live progress bar, Agents side panel, and automatic next-step prompt suggestions.",
   "owner": { "name": "raouf" },
   "plugins": [
     {
       "name": "carapace",
       "source": "./",
-      "description": "Self-contained Claude Code plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, six carapace-* subagents, and the live AbovePrompt progress bar and /agents-info panel.",
+      "description": "Self-contained Claude Code plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, six carapace-* subagents, live AbovePrompt progress bar, Agents side panel, and automatic next-step prompt suggestions.",
       "version": "2.0.0"
     }
   ]

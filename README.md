@@ -1,6 +1,6 @@
 # carapace
 
-A single self-contained Claude Code plugin bundling `carapace` orchestration, `execution-plan-integrity`, `app-slop-audit`, six `carapace-*` subagents, and the live `AbovePrompt` progress bar and `/agents-info` panel.
+A single self-contained Claude Code plugin bundling `carapace` orchestration, `execution-plan-integrity`, `app-slop-audit`, six `carapace-*` subagents, the live `AbovePrompt` progress bar, the Agents side panel, and automatic next-step prompt suggestions.
 
 ## Install in one command (Claude Code)
 
@@ -16,13 +16,13 @@ Or inside Claude Code from a GitHub repository:
 /plugin install carapace --marketplace <owner>/<repo>
 ```
 
-## Commands & Workflow
+## Command Surface (One Slash Command: `/carapace`)
 
 ```text
 /carapace [setup | audit [ui|non-ui] [app...] | <task or batch instruction>]
 ```
 
-- `/carapace` (or `/carapace prompt [intent]`) — **Advisor (default when no task is given)**: spawns `carapace-advisor` (read-only) to inspect `.execution-plan-integrity.json`, `docs/execution-plan.md`, `docs/audit/`, and `git` state, evaluate whether upcoming work can safely run in parallel fan-out mode (`FAN-OUT READY`), needs sequential coordinator steps on `main` first (`HYBRID`), or must run sequentially (`SEQUENTIAL ONLY`), and return a copy-ready orchestration prompt.
+- `/carapace` (or `/carapace next [intent]` / `/carapace prompt [intent]`) — **Advisor (default when no task is given)**: spawns `carapace-advisor` (read-only) to inspect `.execution-plan-integrity.json`, `docs/execution-plan.md`, `docs/audit/`, and `git` state, evaluate whether upcoming work can safely run in parallel fan-out mode (`FAN-OUT READY`), needs sequential coordinator steps on `main` first (`HYBRID`), or must run sequentially (`SEQUENTIAL ONLY`), and return a copy-ready orchestration prompt.
 - `/carapace setup` — **State-driven onboarding & migration** (`init` + `migrate`):
   - In a greenfield repo: initializes `.execution-plan-integrity.json` (schema 2), `docs/execution-plan.md` (`<!-- execution-role: canonical -->` + `<!-- execution-register:start/end -->`), `docs/execution-proofs/`, and `docs/audit/` `.gitignore` rules.
   - In an existing repo with scattered plans or old audits: runs `execution-plan-integrity`'s read-only `audit` crosswalk (stopping for maintainer approval), then applies the migration and imports prior audits into `docs/audit/`.
@@ -30,7 +30,6 @@ Or inside Claude Code from a GitHub repository:
   - When starting or advancing an audit: runs `app-slop-audit` (`v1` or `vN`) for a single app or as a multi-app fan-out across apps (automatically running `reconcile` into `docs/audit/<audit>/shared/`), verifies with `check-records.mjs --report`, and stops for maintainer verdicts.
   - When an undecided `vN.json` is waiting for verdicts: walks through open findings (`shared` first, then per-app), records `vN-verdicts.json`, updates `standards.designAuthority`, and automatically queues accepted findings as ordered rows (`NOW` / `QUEUED`) in `docs/execution-plan.md`.
 - `/carapace <instruction>` — **Execute plan**: executes the canonical register's current `NOW` task one step at a time, or forms and runs a maintainer-directed `VALIDATION` `Batch:` across per-app git worktrees using `fanout.mjs`, `carapace-*` workers, adversarial review, and semantic closure proofs.
-- `/agents-info` — opens or toggles the subagents side panel showing running, finished, and planned subagents with their tier costume, live step progress, model/effort, context window usage, tokens, cost estimate, and elapsed time.
 
 ## What ships in this plugin
 
@@ -49,6 +48,7 @@ Or inside Claude Code from a GitHub repository:
   | `carapace-medium` | standard feature work and scoped audit fix steps |
   | `carapace-light` | mechanical edits, config/lint rules, builds, tests |
 
-- **Live HUD & Progress Hooks (`hooks/` & `types/`)**:
-  - `AbovePrompt` progress bar automatically synced with `.execution-plan-integrity.json` -> `docs/execution-plan.md` (`NOW`, `Batch:`, `IDLE`, and auto-finishing on `NONE`).
-  - `/agents-info` panel (`carapace-agents`) and `mcp__carapace__progress` / `mcp__carapace__step` tools.
+- **Live HUD, Agents Panel & Next-Step Suggestions (`hooks/` & `types/`)**:
+  - `AbovePrompt` progress bar automatically synced with `.execution-plan-integrity.json` -> `docs/execution-plan.md` (`NOW`, `Batch:`, `IDLE`, and auto-finishing on `NONE`), with a crew count button (`×N`) that toggles the Agents side panel.
+  - Agents side panel (`carapace-agents`) auto-opening when a flow or `carapace-*` worker starts, displaying costumed crab sprites, live step progress (`mcp__carapace__step`), model/effort, context window usage, tokens, cost estimate, and elapsed time.
+  - Automatic next-step suggestions via `$.prompt.suggest` (press `Tab` in the empty prompt box to accept) and a clickable `Next → /carapace ...` button (`$.prompt.fill`) in the Agents panel.

@@ -40,6 +40,7 @@ type ProgressInput = {
   done?: number
   phase?: Phase
   finished?: boolean
+  nextPrompt?: string
   tasks?: { title?: string; tier?: string; after?: number[] }[]
 }
 
@@ -62,8 +63,7 @@ const STRINGS = {
   isRunning: 'running',
   isFinished: 'finished',
   isPlanned: 'planned',
-  opened: 'Agents panel opened.',
-  closed: 'Agents panel closed.',
+  next: 'Next',
   done: 'Done',
   plan: 'Plan',
   design: 'Design',
@@ -108,6 +108,12 @@ const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
       after: (t.after ?? []).filter(n => Number.isInteger(n) && n > 0).slice(0, MAX_AFTER),
     }))
 
+const cleanNextPrompt = (v: unknown): string | undefined => {
+  if (typeof v !== 'string') return undefined
+  const trimmed = v.replace(/\s+/g, ' ').trim()
+  return trimmed ? clip(trimmed, MAX_TITLE) : ''
+}
+
 const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   // A new title means a new flow: never carry counters over from an earlier one.
   const base = isNewFlow(prev, input) || !prev ? blank() : { ...blank(), ...prev }
@@ -115,6 +121,7 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   const total = Math.min(MAX_TASKS, Math.max(0, Math.round(input.total ?? (input.tasks ? tasks.length : base.total))))
   const done = Math.min(total || Infinity, Math.max(0, Math.round(input.done ?? base.done)))
   const phase = input.phase && PHASES.includes(input.phase) ? input.phase : base.phase
+  const nextPrompt = cleanNextPrompt(input.nextPrompt)
   return {
     ...base,
     title: clip(input.title?.trim() || base.title, MAX_TITLE),
@@ -122,6 +129,7 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
     done,
     phase: input.finished ? 'close' : phase,
     isFinished: input.finished === true,
+    nextPrompt: nextPrompt !== undefined ? (nextPrompt || undefined) : base.nextPrompt,
     tasks,
   }
 }
@@ -381,10 +389,26 @@ const parseRegister = (md: string): ProgressInput | null => {
   const total = rows.length
   const done = rows.filter(r => r.state === 'DONE').length
   if (nowId === 'NONE') {
-    return { title: 'Execution plan', total, done, phase: 'close', finished: total > 0 && done === total, tasks: [] }
+    return {
+      title: 'Execution plan',
+      total,
+      done,
+      phase: 'close',
+      finished: total > 0 && done === total,
+      nextPrompt: '/carapace audit',
+      tasks: [],
+    }
   }
   if (nowId === 'IDLE') {
-    return { title: 'Execution plan (IDLE)', total, done, phase: 'plan', finished: false, tasks: [] }
+    return {
+      title: 'Execution plan (IDLE)',
+      total,
+      done,
+      phase: 'plan',
+      finished: false,
+      nextPrompt: '/carapace',
+      tasks: [],
+    }
   }
 
   const nowRow = rows.find(r => r.id === nowId)
@@ -401,6 +425,7 @@ const parseRegister = (md: string): ProgressInput | null => {
     done,
     phase: 'delegate',
     finished: false,
+    nextPrompt: `/carapace Execute ${nowId}`,
     tasks,
   }
 }
@@ -708,6 +733,91 @@ const ctxBar = (pct: number, width: number): string => {
 
 const STATUS_GLYPH: Record<string, string> = { running: '●', done: '✓', failed: '✗', planned: '◷' }
 
+// 3-row × 5-column truecolor half-block crab for the terminal surface, one costume per tier.
+const termCrab = (
+  ui: ReturnType<EngineInterface['ui']['resolve']>,
+  costume: string,
+  isWalking: boolean,
+  at: number,
+  dim = false,
+) => {
+  const { Box, Text } = ui
+  const step = isWalking && Math.floor(at / 1000) % 2 === 1
+  const eyes = costume === 'explore' ? '▀ ■' : '▀ ▀'
+  const legs = !isWalking ? ' ▀ ▀ ' : costume === 'fable' ? (step ? ' ▄ ▄ ' : ' ▀ ▀ ') : step ? ' ▀ ▄ ' : ' ▄ ▀ '
+
+  const hat = () => {
+    switch (costume) {
+      case 'fable':
+        return (
+          <Text dimColor={dim}>
+            <Text color="#7F77DD">{step ? '  ▄' : '  ▀'}</Text>
+            <Text color="#F5C542">{step ? ' ·' : ' ✦'}</Text>
+          </Text>
+        )
+      case 'heavy':
+        return (
+          <Text dimColor={dim}>
+            <Text color="#7A4A26">{' ▄▄▄'}</Text>
+            <Text color="#A9D6F5">{step ? '○' : '⌕'}</Text>
+          </Text>
+        )
+      case 'careful':
+        return (
+          <Text dimColor={dim}>
+            <Text color="#8E929A">{step ? '⊢' : '⊤'}</Text>
+            <Text color="#F5C542">{'▄▄▄ '}</Text>
+          </Text>
+        )
+      case 'medium':
+        return (
+          <Text dimColor={dim}>
+            <Text color="#F4F3EE">{' ▄▄▄'}</Text>
+            <Text color="#F5B731">{step ? '▾' : '▴'}</Text>
+          </Text>
+        )
+      case 'light':
+        return (
+          <Text dimColor={dim}>
+            <Text color="#1D9E75">{' ▄'}</Text>
+            <Text color="#F8F6F1">{'▄'}</Text>
+            <Text color="#1D9E75">{'▄'}</Text>
+            <Text color="#F8F6F1">{step ? '⚐' : '⚑'}</Text>
+          </Text>
+        )
+      case 'explore':
+        return (
+          <Text dimColor={dim}>
+            <Text color="#55514C">{' ▄▄▄'}</Text>
+            <Text color="#C9CCD2">{step ? '│' : '╱'}</Text>
+          </Text>
+        )
+      default:
+        return <Text dimColor={dim}>{'     '}</Text>
+    }
+  }
+
+  const leftArm = costume === 'fable' ? '#A9D6F5' : CLAY
+  const rightArm = costume === 'fable' ? '#A9D6F5' : costume === 'medium' ? '#4A4A48' : CLAY
+  const rightGlyph = costume === 'medium' ? '▬' : '▌'
+
+  return (
+    <Box flexDirection="column" width={5} flexShrink={0}>
+      {hat()}
+      <Text dimColor={dim}>
+        <Text color={leftArm}>▐</Text>
+        <Text color={INK} backgroundColor={CLAY}>
+          {eyes}
+        </Text>
+        <Text color={rightArm}>{rightGlyph}</Text>
+      </Text>
+      <Text color={CLAY} dimColor={dim}>
+        {legs}
+      </Text>
+    </Box>
+  )
+}
+
 // Opens the agents pane, or closes it when it is up; true when it ends up open.
 async function togglePane($: EngineInterface): Promise<boolean> {
   const isOpen = (await $.ui.panes()).some(p => p.id === PANE)
@@ -728,6 +838,11 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   void $.ui.open({ id: PANE, title: STRINGS.pane })
 }
 
+async function suggestNext($: EngineInterface, text: string | undefined): Promise<void> {
+  if (!text) return
+  await $.prompt.suggest({ text }).catch(() => null)
+}
+
 async function syncRegister($: EngineInterface): Promise<void> {
   try {
     const rawCfg = await $.fs.read(REGISTER_CONFIG)
@@ -739,14 +854,21 @@ async function syncRegister($: EngineInterface): Promise<void> {
     const current = await read($, flow)
     if (current && !current.isFinished && !current.isFromRegister) {
       if (parsed.finished) {
-        await update($, flow, prev => (prev ? { ...prev, done: prev.total, phase: 'close', isFinished: true } : prev))
+        await update($, flow, prev =>
+          prev ? { ...prev, done: prev.total, phase: 'close', isFinished: true, nextPrompt: parsed.nextPrompt ?? prev.nextPrompt } : prev,
+        )
+        await suggestNext($, parsed.nextPrompt)
+      } else if (parsed.nextPrompt) {
+        await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
+        await suggestNext($, parsed.nextPrompt)
       }
       return
     }
-    await update($, flow, prev => {
+    const next = await update($, flow, prev => {
       const merged = merge(prev, parsed)
       return { ...merged, running: prev ? prev.running : 0, isFromRegister: true }
     })
+    await suggestNext($, next?.nextPrompt)
   } catch {
     // No .execution-plan-integrity.json or canonical register in this repo.
   }
@@ -761,7 +883,7 @@ export const register: Register = (on, options) => {
       description:
         'Report /carapace progress to the progress bar above the prompt and the agents panel. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
-        'when switching phase or re-planning (tasks), and once at the end with finished: true. Fields left out keep their previous value. ' +
+        'when switching phase or re-planning (tasks), and once at the end with finished: true (and optional nextPrompt). Fields left out keep their previous value. ' +
         'For the main session only: a call from a subagent is ignored (workers report with `step`).',
       inputSchema: {
         type: 'object',
@@ -771,6 +893,10 @@ export const register: Register = (on, options) => {
           done: { type: 'integer', minimum: 0, description: 'Number of tasks accepted after review.' },
           phase: { type: 'string', enum: [...PHASES] },
           finished: { type: 'boolean', description: 'True once the flow is closed.' },
+          nextPrompt: {
+            type: 'string',
+            description: 'Recommended next /carapace command to suggest in the prompt box and panel (e.g. "/carapace Execute UI-APPLY-25-WEB" or "/carapace audit ui").',
+          },
           tasks: {
             type: 'array',
             description:
@@ -806,10 +932,6 @@ export const register: Register = (on, options) => {
       // In every agent's tool list, not behind ToolSearch: workers do not go looking for it.
       isDeferred: false,
     })
-    await $.command.register({
-      name: 'agents-info',
-      description: 'Show or hide the panel of subagents: running, finished and planned, with model, context, cost and time',
-    })
 
     // Ticks the running agents' clocks; quiet when nothing runs.
     $.clock.every(1000, () => {
@@ -823,16 +945,12 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('command.run', { command: 'agents-info' }, async ($, e) => {
-    // `/agents-info open` opens the panel, or brings it forward from behind another tab, without toggling it.
-    if ((e.args ?? '').trim() === 'open') {
-      const at = await $.clock.now()
-      await update($, now, () => at)
-      await $.ui.open({ id: PANE, title: STRINGS.pane })
-      return { text: STRINGS.opened }
+  on('prompt.suggest', async ($, e, next) => {
+    const f = await read($, flow)
+    if (f?.nextPrompt && e.origin.kind !== 'plugin') {
+      return next({ ...e, text: f.nextPrompt })
     }
-    const isOpen = await togglePane($)
-    return { text: isOpen ? STRINGS.opened : STRINGS.closed }
+    return next(e)
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
@@ -847,6 +965,9 @@ export const register: Register = (on, options) => {
     }
     const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
     if (next && input.tasks?.length) await autoOpen($, next.title)
+    if (next?.nextPrompt && (input.nextPrompt !== undefined || next.isFinished)) {
+      await suggestNext($, next.nextPrompt)
+    }
     return { result: `ok: ${label(next ?? blank())}` }
   })
 
@@ -1035,6 +1156,15 @@ export const register: Register = (on, options) => {
     )
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
+    const nextCmd = f?.nextPrompt
+    const nextButton = nextCmd ? (
+      <Button
+        key="carapace-next"
+        label={`${s.next} → ${nextCmd}`}
+        plain
+        onPress={() => void $.prompt.fill({ text: nextCmd }).catch(() => null)}
+      />
+    ) : null
 
     if (e.surface === 'desktop' && 'Svg' in ui) {
       const { Svg } = ui
@@ -1049,12 +1179,19 @@ export const register: Register = (on, options) => {
         return (
           <Box flexDirection="column" gap={1}>
             <Svg source={compactSvg(W, list, planned, t)} alt={`${list.length} ${s.agentsCount}, ${summary}`} width={W} height={32} />
+            {nextButton}
             {toggleCompact}
           </Box>
         )
       }
       const shownDone = p.isDoneCollapsed ? 0 : finished.length
-      const lines = 1 + (isEmpty ? 1 : 0) + (running.length > 0 ? 1 : 0) + (finished.length > 0 ? 1 : 0) + (planned.length > 0 ? 1 : 0)
+      const lines =
+        1 +
+        (nextButton ? 1 : 0) +
+        (isEmpty ? 1 : 0) +
+        (running.length > 0 ? 1 : 0) +
+        (finished.length > 0 ? 1 : 0) +
+        (planned.length > 0 ? 1 : 0)
       const gridH = headerHeight(title) + lines * LINE_H + (running.length + shownDone) * 66 + planned.length * 46
       return (
         <Box flexDirection="column">
@@ -1065,6 +1202,7 @@ export const register: Register = (on, options) => {
           ))}
           <Box flexDirection="column" position="absolute" top={0} left={0} right={0}>
             <Svg source={headerSvg(W, title, t)} alt={title ? `${title}: ${summary}` : summary} width={W} height={headerHeight(title)} />
+            {nextButton}
             {toggleCompact}
             {isEmpty && <Text dimColor>{s.empty}</Text>}
             {running.length > 0 && section('h-run', `${s.running} · ${running.length}`)}
@@ -1085,9 +1223,9 @@ export const register: Register = (on, options) => {
       )
     }
 
-    // Terminal: the same content in text rows.
+    // Terminal: the same content in text rows with 3-row half-block pixel crabs.
     const cols = Math.max(24, e.props.bodyColumns || 40)
-    const barW = Math.max(6, Math.min(20, cols - 34))
+    const barW = Math.max(6, Math.min(20, cols - 38))
     const row = (a: AgentRun) => {
       const tier = tierOf(a.type)
       const color = colorOf(tier)
@@ -1096,27 +1234,27 @@ export const register: Register = (on, options) => {
       const model = runModel(a)
       const steps = a.stepTotal ? `${a.stepDone ?? 0}/${a.stepTotal}${a.stepNote ? ' ' + a.stepNote : ''} · ` : ''
       return (
-        <Box key={a.id} flexDirection="column" marginBottom={1}>
-          <Box flexDirection="row" gap={1}>
-            <Text color={color}>▣</Text>
-            <Text bold wrap="truncate-end">
-              {a.description || a.type}
+        <Box key={a.id} flexDirection="row" gap={1} marginBottom={1}>
+          {termCrab(ui, costumeOf(a.type), a.status === 'running', at)}
+          <Box flexDirection="column">
+            <Box flexDirection="row" gap={1}>
+              <Text bold wrap="truncate-end">
+                {a.description || a.type}
+              </Text>
+              <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
+            </Box>
+            <Text dimColor wrap="truncate-end">
+              {tier === 'other' ? a.type : tierWord(tier)} · {model}
+              {a.round > 1 ? ` · ${s.round} ${a.round}` : ''}
             </Text>
-            <Text color={a.status === 'failed' ? 'red' : a.status === 'done' ? 'green' : color}>{STATUS_GLYPH[a.status]}</Text>
+            <Text wrap="truncate-end">
+              {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={color}>{ctxBar(progress * 100, barW)}</Text>}
+              <Text dimColor>
+                {' '}
+                {steps}{s.ctx} {ctx}% · {fmtTokens(a.contextTokens)} ≈{fmtCost(a.costUsd)} {fmtTime(elapsed(a, at))}
+              </Text>
+            </Text>
           </Box>
-          <Text dimColor wrap="truncate-end">
-            {'  '}
-            {tier === 'other' ? a.type : tierWord(tier)} · {model}
-            {a.round > 1 ? ` · ${s.round} ${a.round}` : ''}
-          </Text>
-          <Text wrap="truncate-end">
-            {'  '}
-            {progress === null ? <Text dimColor>{ctxBar(ctx, barW)}</Text> : <Text color={color}>{ctxBar(progress * 100, barW)}</Text>}
-            <Text dimColor>
-              {' '}
-              {steps}{s.ctx} {ctx}% · {fmtTokens(a.contextTokens)} ≈{fmtCost(a.costUsd)} {fmtTime(elapsed(a, at))}
-            </Text>
-          </Text>
         </Box>
       )
     }
@@ -1132,6 +1270,7 @@ export const register: Register = (on, options) => {
         <Text dimColor>
           ≈{fmtCost(t.cost)} · {fmtTokens(t.tokens)} {s.tokensWord} · {fmtTime(t.time)}
         </Text>
+        {nextButton}
         {p.isCompact ? (
           <Text wrap="truncate-end">
             {[...running, ...finished].map(a => (
@@ -1156,15 +1295,17 @@ export const register: Register = (on, options) => {
             {planned.map(pl => {
               const tier = pl.tier in TIER_COLOR ? pl.tier : 'other'
               return (
-                <Box key={`plan-${pl.n}`} flexDirection="column" marginBottom={1}>
-                  <Text dimColor wrap="truncate-end">
-                    <Text color={colorOf(tier)}>▢</Text> {pl.n}. {pl.title} ◷
-                  </Text>
-                  <Text dimColor wrap="truncate-end">
-                    {'  '}
-                    {tierWord(tier)}
-                    {pl.after.length ? ` · ${s.after} ${pl.after.join(', ')}` : ''}
-                  </Text>
+                <Box key={`plan-${pl.n}`} flexDirection="row" gap={1} marginBottom={1}>
+                  {termCrab(ui, tier, false, at, true)}
+                  <Box flexDirection="column">
+                    <Text dimColor wrap="truncate-end">
+                      {pl.n}. {pl.title} ◷
+                    </Text>
+                    <Text dimColor wrap="truncate-end">
+                      <Text color={colorOf(tier)}>{tierWord(tier)}</Text>
+                      {pl.after.length ? ` · ${s.after} ${pl.after.join(', ')}` : ''}
+                    </Text>
+                  </Box>
                 </Box>
               )
             })}

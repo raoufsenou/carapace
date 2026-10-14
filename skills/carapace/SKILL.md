@@ -35,9 +35,9 @@ The progress bar (`mcp__carapace__progress`) and, when requested by the user, `T
 
 If `mcp__carapace__progress` is available (load via ToolSearch `select:mcp__carapace__progress` if deferred), keep it current:
 - When starting a single task, a sequence of steps, or a batch: call `mcp__carapace__progress` with `title` (flow or batch name), `total` (number of steps/workers in this run), `done` (completed so far), `phase: "delegate"` (or `"plan"` / `"design"`), and `tasks` (`[{ title, tier, after }]` in order; `tier` without `carapace-`).
-- When delegating with `Agent`, pass the task's `title` verbatim as `description` so the `/agents-info` panel matches runs to planned tasks.
+- When delegating with `Agent`, pass the task's `title` verbatim as `description` so the Agents panel matches runs to planned tasks.
 - Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
-- Call with `finished: true` when the requested run closes.
+- Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command for the updated repo state) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
 
 ---
 
@@ -268,6 +268,8 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
    - Run `execution-register.test.mjs`, `check-execution-plan.mjs --root <repo>`, and (when closing an audit apply round) `check-records.mjs <audit> --complete`.
    - Commit if authorized, and update `mcp__carapace__progress`.
 
-## 5. Close
+## 5. Close & Next Step Suggestion
 
-Report concisely to the user: which register tasks/batches closed and their proof paths, what verification and checker commands ran and their observed output, the current `NOW` pointer (`<TASK-ID>`, `IDLE`, or `NONE`), and which `carapace-*` tiers ran.
+Report concisely to the user:
+1. Which register tasks/batches closed and their proof paths, what verification and checker commands ran and their observed output, the current `NOW` pointer (`<TASK-ID>`, `IDLE`, or `NONE`), and which `carapace-*` tiers ran.
+2. **Next Step**: Always end with a single copy-pasteable `Next: /carapace ...` recommendation matching the updated repository state (and pass that same command as `nextPrompt` in your closing `mcp__carapace__progress` call).

@@ -85,6 +85,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
 | 3 | \`UI-APPLY-25-WEB\` | \`IMPLEMENTATION\` | \`QUEUED\` | Apply web dashboard spacing fixes. | Audit v1 |
 <!-- execution-register:end -->`
 
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      suggested.push(e.text)
+      return { isShown: true }
+    })
     on('fs.read', async (_$, e) => {
       if (e.path.endsWith('.execution-plan-integrity.json')) {
         return { value: JSON.stringify({ schema: 2, canonical: 'docs/execution-plan.md' }) } as never
@@ -101,6 +106,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const bar1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     // 2 pending tasks (UI-APPLY-24-VERIFIER + UI-APPLY-25-WEB) appear in the crew count.
     expect((await bar1.find({ key: 'carapace-agents' }))?.props.label).toBe('×2')
+    expect(suggested.at(-1)).toBe('/carapace Execute UI-APPLY-24-VERIFIER')
+
+    const panel1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await panel1.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace Execute UI-APPLY-24-VERIFIER')
+    await panel1.unmount()
 
     // Transition step 24 to DONE and form a Batch over step 25.
     canonicalMd = `<!-- execution-role: canonical -->
@@ -119,11 +129,14 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const bar2 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     expect((await bar2.find({ key: 'carapace-agents' }))?.props.label).toBe('×1')
+    expect(suggested.at(-1)).toBe('/carapace Execute UI-APPLY-BATCH-1')
 
     const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
     expect(await panelUi.find({ text: /Planned · 1/ })).toBeDefined()
+    expect((await panelUi.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace Execute UI-APPLY-BATCH-1')
+    await panelUi.unmount()
 
-    // Even if a manual progress flow is active, reaching NOW: NONE in the canonical register finishes the bar.
+    // Even if a manual progress flow is active, reaching NOW: NONE in the canonical register finishes the bar and suggests /carapace audit.
     await $.tool.call({ tool: PROGRESS, title: 'Execute UI-APPLY-BATCH-1', phase: 'review', total: 2, done: 1 } as never)
     canonicalMd = `<!-- execution-role: canonical -->
 <!-- execution-register:start -->
@@ -135,6 +148,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
 | 2 | \`UI-APPLY-BATCH-1\` | \`VALIDATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-BATCH-1.json. | Audit v1 |
 <!-- execution-register:end -->`
     await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
+    expect(suggested.at(-1)).toBe('/carapace audit')
+    const panelDone = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await panelDone.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace audit')
     const bar3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     if (surface === 'terminal') {
       expect(await bar3.find({ text: /Done/ })).toBeDefined()
@@ -146,6 +162,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 
   test(`${surface}: carapace-advisor is treated as a read-only scout without worker STEP_BRIEF injection`, async ($, on) => {
+    mock.clock(on)
     on('ui.open', () => ({ value: { isPlaced: true } }))
     const seenPrompts: Record<string, string> = {}
     on('agent.spawn', async (_$, e) => {
@@ -170,6 +187,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     expect(seenPrompts['carapace-advisor']).toBe('Inspect canonical register and fan-out feasibility.')
     expect(seenPrompts['carapace-careful']).toContain('mcp__carapace__step')
+
+    if (surface === 'terminal') {
+      const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+      // carapace-advisor wears the explore pirate costume (eyepatch `▀ ■` and cutlass `╱`), while carapace-careful wears the engineer wrench `⊤`.
+      expect(await panelUi.find({ text: /▀ ■/ })).toBeDefined()
+      expect(await panelUi.find({ text: /⊤/ })).toBeDefined()
+    }
   })
 }
 
