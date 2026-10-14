@@ -1,0 +1,11 @@
+# Local launcher & Claude home config
+scripts/
+.claude-home/
+
+# OS & editor artifacts
+.DS_Store
+
+# Dependencies & local env
+node_modules/
+.env
+.env.*
