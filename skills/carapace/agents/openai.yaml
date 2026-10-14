@@ -1,0 +1,7 @@
+interface:
+  display_name: "Carapace"
+  short_description: "Orchestrate execution plans, audits, and worker batches"
+  default_prompt: "Use $carapace to inspect this repository's canonical execution register and audit records, evaluate fan-out feasibility, and recommend or execute the next step."
+
+policy:
+  allow_implicit_invocation: true

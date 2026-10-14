@@ -1,5 +1,5 @@
 # Local launcher & Claude home config
-scripts/
+scripts/claude.mjs
 .claude-home/
 artifact/
 

@@ -29,15 +29,18 @@ Task from the user: $ARGUMENTS
 4. **Worker and advisor availability**:
    - Subagents must exist: `carapace-advisor` (read-only state researcher, fan-out feasibility analyzer, and prompt generator) and the five execution workers `carapace-fable`, `carapace-heavy`, `carapace-careful`, `carapace-medium`, `carapace-light` (or namespaced as `carapace:carapace-*`).
 
-## Live view (`mcp__carapace__progress` & `TodoWrite`)
+## Live view (`mcp__carapace__progress`, `TodoWrite` / `update_plan`, & `status.mjs`)
 
-The progress bar (`mcp__carapace__progress`) and, when requested by the user, `TodoWrite` are a **live view for the user, never a second queue**: the canonical execution register stays the record.
+The progress bar (`mcp__carapace__progress`), harness checklist (`TodoWrite` / `update_plan`), and `status.mjs` output are a **live view for the user, never a second queue**: the canonical execution register stays the record.
 
-If `mcp__carapace__progress` is available (load via ToolSearch `select:mcp__carapace__progress` if deferred), keep it current:
-- When starting a single task, a sequence of steps, or a batch: call `mcp__carapace__progress` with `title` (flow or batch name), `total` (number of steps/workers in this run), `done` (completed so far), `phase: "delegate"` (or `"plan"` / `"design"`), and `tasks` (`[{ title, tier, after }]` in order; `tier` without `carapace-`).
-- When delegating with `Agent`, pass the task's `title` verbatim as `description` so the Agents panel matches runs to planned tasks.
-- Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
-- Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command for the updated repo state) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
+- **In Claude Code (`mcp__carapace__progress` available; load via ToolSearch `select:mcp__carapace__progress` if deferred)**:
+  - When starting a single task, a sequence of steps, or a batch: call `mcp__carapace__progress` with `title` (flow or batch name), `total` (number of steps/workers in this run), `done` (completed so far), `phase: "delegate"` (or `"plan"` / `"design"`), and `tasks` (`[{ title, tier, after }]` in order; `tier` without `carapace-`).
+  - When delegating with `Agent`, pass the task's `title` verbatim as `description` so the Agents panel matches runs to planned tasks.
+  - Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
+  - Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command for the updated repo state) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
+- **In Codex and Cursor (where Claude Code's runtime SDK tools `mcp__carapace__progress` / `mcp__carapace__step` are absent)**:
+  - Use the harness's native live checklist (`TodoWrite` in Cursor, `update_plan` in Codex) to keep the active task or batch steps visible above the composer as work progresses.
+  - At the end of the turn, run `node <carapace-skill-path>/assets/status.mjs --root <repo>` and include its two-line output (`Carapace: [████░░] Done/Total (%) · NOW: <ID>` and `Next → /carapace ...`) at the bottom of your closing report.
 
 ---
 
@@ -272,4 +275,4 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
 
 Report concisely to the user:
 1. Which register tasks/batches closed and their proof paths, what verification and checker commands ran and their observed output, the current `NOW` pointer (`<TASK-ID>`, `IDLE`, or `NONE`), and which `carapace-*` tiers ran.
-2. **Next Step**: Always end with a single copy-pasteable `Next: /carapace ...` recommendation matching the updated repository state (and pass that same command as `nextPrompt` in your closing `mcp__carapace__progress` call).
+2. **Next Step**: Always end with the deterministic `Next → /carapace ...` recommendation matching the updated repository state — pass it as `nextPrompt` in your closing `mcp__carapace__progress` call in Claude Code, or print the two-line footer from `node <carapace-skill-path>/assets/status.mjs --root <repo>` in Codex and Cursor.

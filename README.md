@@ -2,18 +2,22 @@
 
 A single self-contained Claude Code plugin bundling `carapace` orchestration, `execution-plan-integrity`, `app-slop-audit`, six `carapace-*` subagents, the live `AbovePrompt` progress bar, the Agents side panel, and automatic next-step prompt suggestions.
 
-## Install in one command (Claude Code)
+## Install across Claude Code, Codex, and Cursor
 
-From a local checkout:
+From a local checkout, install (or update with `--replace`) into all three harnesses (`~/.claude`, `~/.codex`, and `~/.cursor`):
+
+```bash
+node scripts/install.mjs
+# Replace existing installs that differ from this checkout:
+node scripts/install.mjs --replace
+# Or target specific harnesses:
+node scripts/install.mjs --target claude,codex,cursor
+```
+
+Or install only the Claude Code plugin directly via `claude`:
 
 ```bash
 claude plugin install carapace --marketplace /path/to/cc-mods
-```
-
-Or inside Claude Code from a GitHub repository:
-
-```text
-/plugin install carapace --marketplace <owner>/<repo>
 ```
 
 ## Command Surface (One Slash Command: `/carapace`)
