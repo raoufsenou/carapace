@@ -1,0 +1,7 @@
+interface:
+  display_name: "App Slop Audit"
+  short_description: "Find UI slop in an app, keep verdicts, prove fixes"
+  default_prompt: "Use $app-slop-audit to audit this app's UI for rushed or AI-built work: read its UI audit records first, re-check every earlier finding, find what is new with its current state, why it should be redone, and the new version, and stop for my verdicts."
+
+policy:
+  allow_implicit_invocation: true

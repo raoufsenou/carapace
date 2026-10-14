@@ -1,0 +1,99 @@
+/* The chrome every report this skill writes shares. Copy it beside review.html unchanged: the checker compares the
+   copy with this file. What one report needs beyond it goes in that report's own <style>. */
+:root{--bg:#efeee9;--paper:#fff;--ink:#1a1a17;--sub:#4f4c46;--mute:#68645c;--line:#deddd8;--soft:#f7f7f5;--hi:#973b31;--hi-bg:#fae8e4;--med:#7b581c;--med-bg:#f7edd8;--lo:#405d7c;--lo-bg:#e1e8f0;--ok:#2f6a4a;--ok-bg:#e3f0e8}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 Geist,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.page{max-width:1340px;margin:0 auto;padding:40px 32px 140px}
+h1{font-size:32px;letter-spacing:-.02em;margin:0 0 10px;line-height:1.15}
+h2{font-size:23px;letter-spacing:-.01em;margin:64px 0 4px}
+h2+p.section-lede{color:var(--sub);max-width:960px;margin-bottom:8px}
+p{margin:0 0 10px}
+a{color:#8f4228}
+code,pre,.mono{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.86em;background:#e9e8e2;padding:1px 5px;border-radius:4px}
+pre{background:#1d1c19;color:#ecebe4;padding:14px 16px;border-radius:8px;font-size:12.5px;line-height:1.6;overflow:auto;margin:0 0 12px;white-space:pre}
+pre code{background:none;padding:0;font-size:inherit;color:inherit}
+pre .c{color:#9a978e} pre .del{color:#ff9a8e;text-decoration:line-through;text-decoration-color:rgba(255,154,142,.5)} pre .add{color:#a6e3bd} pre .k{color:#f2c27b}
+.lede{font-size:17px;color:var(--sub);max-width:980px}
+
+/* The numbers */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px;margin:26px 0 10px}
+.stat{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13px;color:var(--sub)}
+.stat b{font-size:26px;display:block;color:var(--ink);line-height:1.2}
+.stat b.high{color:var(--hi)} .stat b.medium{color:var(--med)} .stat b.low{color:var(--lo)}
+
+/* Boxes and contents */
+.box{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:18px 22px;margin:18px 0}
+.box h3{margin:0 0 8px;font-size:17px}
+.box ol,.box ul{margin:6px 0 0;padding-left:20px}
+.box li{margin:4px 0}
+.toc{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 28px;font-size:13.5px}
+.toc a{color:var(--ink);text-decoration:none;display:flex;gap:8px;padding:2px 0}
+.toc a:hover{text-decoration:underline}
+.toc .fid{flex:none;width:28px}
+.toc h4{grid-column:1/-1;margin:10px 0 2px;font-size:12.5px;color:var(--mute)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;margin-top:7px}
+.dot.high{background:var(--hi)} .dot.medium{background:#c08a2b} .dot.low{background:#7d94b0}
+
+/* A finding's card */
+.finding{background:var(--paper);border:1px solid var(--line);border-radius:14px;margin:22px 0;overflow:hidden;scroll-margin-top:16px}
+.finding>header{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:16px 22px 10px}
+.finding>header h3{margin:0;font-size:18.5px;letter-spacing:-.01em;line-height:1.3;flex:1 1 100%;order:2}
+.finding>header .meta{order:1;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.fid{font-family:"Geist Mono",ui-monospace,monospace;font-size:13px;color:var(--mute)}
+.tag{font-size:12px;font-weight:600;padding:1px 9px;border-radius:999px;white-space:nowrap;line-height:20px}
+.tag.high{background:var(--hi-bg);color:var(--hi)} .tag.medium{background:var(--med-bg);color:var(--med)} .tag.low{background:var(--lo-bg);color:var(--lo)}
+.tag.type{background:#f1f1ee;color:var(--sub);font-weight:500}
+.tag.backend{background:#ebe7f5;color:#4f437e}
+.why{padding:0 22px 16px;color:var(--sub);max-width:1060px}
+.why p:last-child{margin-bottom:0}
+.why b{color:var(--ink)}
+.loc{font-family:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:var(--mute);margin:0 0 8px;overflow-wrap:anywhere}
+.design{margin:10px 0 0;font-size:13.5px;border-left:3px solid #d0a460;background:#fbf6ea;padding:7px 12px;color:#5a3f12;border-radius:0 6px 6px 0}
+.design i{font-style:normal;color:#806b3f}
+.cmp{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);border-top:1px solid var(--line)}
+.cmp.stack{grid-template-columns:minmax(0,1fr)}
+.cmp.wide-new{grid-template-columns:minmax(0,5fr) minmax(0,7fr)}
+.side{padding:16px 22px 20px;min-width:0}
+.side+.side{border-left:1px solid var(--line);background:#fcfcfa}
+.cmp.stack .side+.side{border-left:0;border-top:1px solid var(--line)}
+.label{font-size:12.5px;font-weight:600;margin:0 0 12px;display:flex;gap:8px;align-items:center}
+.label::before{content:'';width:9px;height:9px;border-radius:50%;background:currentColor}
+.side.now .label{color:var(--hi)} .side.new .label{color:var(--ok)}
+figure{margin:0 0 14px}
+figure img{display:block;max-width:100%;border:1px solid var(--line);border-radius:8px;background:#fff}
+figcaption{font-size:13px;color:var(--mute);margin-top:6px}
+.note{font-size:13px;color:var(--mute);margin-top:8px}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+
+/* A whole page, scrolled inside a box */
+.scroll{max-height:560px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:#fff}
+.scroll img{border:0;border-radius:0;width:100%}
+.scroll.narrow{max-width:320px}
+
+/* A band cut from a screenshot: --x and --y place its top-left corner and --w and --h size it, in the screenshot's CSS
+   pixels; --sw is the screenshot's width, 1440 unless set. It is shown at most at its real size. */
+.band{--x:0;--y:0;--sw:1440;overflow:hidden;border:1px solid var(--line);border-radius:8px;background:#fff;aspect-ratio:var(--w)/var(--h);max-width:calc(var(--w) * 1px)}
+.band img{display:block;max-width:none;border:0;border-radius:0;width:calc(var(--sw) / var(--w) * 100%);margin:calc(var(--y) / var(--w) * -100%) 0 0 calc(var(--x) / var(--w) * -100%)}
+.scroll .band{border:0;border-radius:0}
+
+/* A drawing: report.js renders each <template class="draw"> in a frame, at its data-w, scaled to its column */
+figure template{display:none}
+.frame{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;height:140px}
+.frame iframe{display:block;border:0;transform-origin:0 0}
+.frame[data-overflow]{outline:2px solid var(--hi);outline-offset:2px}
+
+/* Measurements */
+table.data{border-collapse:collapse;width:100%;font-size:13.5px;margin:0 0 10px}
+table.data th,table.data td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+table.data th{font-size:12px;color:var(--mute);font-weight:600}
+table.data td.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.fail{color:var(--hi);font-weight:600} .pass{color:var(--ok);font-weight:600}
+.bars{display:flex;flex-direction:column;gap:7px;font-size:13px}
+.bar{display:grid;grid-template-columns:210px minmax(0,1fr) 120px;gap:10px;align-items:center}
+.bar .track{height:14px;background:#f1f1ee;border-radius:3px;position:relative;overflow:hidden}
+.bar .fill{position:absolute;top:0;bottom:0;left:0;background:#d39a91}
+.bar .vp{position:absolute;top:-2px;bottom:-2px;width:2px;background:var(--ink)}
+.bar .n{text-align:right;font-variant-numeric:tabular-nums;color:var(--sub)}
+.quote{font-family:"Geist Mono",ui-monospace,monospace;font-size:12.5px;background:#f6f5f1;border:1px solid var(--line);border-radius:8px;padding:10px 12px;white-space:pre-wrap;color:#33312c;margin:0 0 12px}

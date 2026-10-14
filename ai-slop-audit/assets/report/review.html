@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>⟪The app's name⟫, audited</title>
+<link rel="stylesheet" href="report.css">
+<link rel="drawing-stylesheet" href="⟪assets/app.css: the app's built stylesheet, copied beside the report⟫">
+<style>
+/* What this report needs beyond report.css. */
+</style>
+</head>
+<body>
+<div class="page">
+
+<h1>⟪The app's name⟫, audited: what was rushed, and what replaces it</h1>
+<p class="lede">⟪One paragraph for the reader: what was examined, in their words, at the size real use reaches; then the promise of what follows: for each thing rushed or never looked at, the current state, why it should be redone, and the new version, drawn where it is design and given as code where it is code.⟫</p>
+
+<div class="stats">
+  <div class="stat"><b>⟪n⟫</b>findings</div>
+  <div class="stat"><b class="high">⟪n⟫</b>high</div>
+  <div class="stat"><b class="medium">⟪n⟫</b>medium</div>
+  <div class="stat"><b class="low">⟪n⟫</b>low</div>
+  <div class="stat"><b>⟪n⟫</b>build defects</div>
+  <div class="stat"><b>⟪n⟫</b>design choices</div>
+  <div class="stat"><b>⟪n⟫</b>not built</div>
+</div>
+
+<div class="box">
+  <h3>The pattern behind most of it</h3>
+  <ol>
+    <li><b>⟪A cause, named plainly.⟫</b> ⟪What it explains, linking each finding it accounts for.⟫</li>
+  </ol>
+</div>
+
+<div class="box">
+  <h3>How to read the tags</h3>
+  <ul>
+    <li><span class="tag high">High</span> ⟪what high means for this app, as its standards define it⟫</li>
+    <li><span class="tag medium">Medium</span> ⟪what medium means⟫</li>
+    <li><span class="tag low">Low</span> ⟪what low means⟫</li>
+    <li><span class="tag type">Build defect</span> the build is wrong, or contradicts its own design; fixing it needs no decision.</li>
+    <li><span class="tag type">Design choice</span> the design asked for this, so changing it is your decision.</li>
+    <li><span class="tag type">Not built</span> neither designed nor built, but expected of any app like this one.</li>
+  </ul>
+</div>
+
+<div class="box">
+  <h3>Contents</h3>
+  <div class="toc">
+    <h4>A · ⟪Area name⟫</h4>
+    <a href="#A1"><span class="dot high"></span><span class="fid">A1</span><span>⟪Its title⟫</span></a>
+    <h4>B · ⟪Area name⟫</h4>
+    <a href="#B1"><span class="dot medium"></span><span class="fid">B1</span><span>⟪Its title⟫</span></a>
+  </div>
+</div>
+
+<!-- From v2 on, report.md's sections for what came back, what is still open, and the reopen proposals go here. -->
+
+<h2>A · ⟪Area name⟫</h2>
+<p class="section-lede">⟪What this area covers, in one sentence.⟫</p>
+
+<section class="finding" id="A1">
+  <header>
+    <div class="meta"><span class="fid">A1</span><span class="tag high">High</span><span class="tag type">Build defect</span></div>
+    <h3>⟪The title: each defect the finding is about, as the user meets it⟫</h3>
+  </header>
+  <div class="why">
+    <p>⟪What is wrong, as the user meets it, with each measurement in the sentence that needs it, and what it costs them. Then why it should be redone: what the screen is for, and how the current state fails that.⟫</p>
+    <p class="design">⟪The design's sentence the build contradicts, quoted.⟫ <i>— ⟪where the design says it⟫</i></p>
+  </div>
+  <div class="cmp stack">
+    <div class="side now">
+      <p class="label">Current</p>
+      <p class="loc">⟪the files and lines that draw it⟫</p>
+      <figure>
+        <div class="band" style="--x:0;--y:0;--w:1440;--h:900"><img src="shots/⟪what it shows⟫-desktop.png" alt="⟪what the screenshot shows⟫"></div>
+        <figcaption>⟪What to look at in it, with its measurement.⟫</figcaption>
+      </figure>
+      <div class="bars">
+        <div class="bar"><span>⟪what was measured⟫</span><span class="track"><span class="fill" style="width:⟪share of the longest⟫%"></span><span class="vp" style="left:⟪the window's share⟫%"></span></span><span class="n">⟪measurement⟫</span></div>
+      </div>
+    </div>
+    <div class="side new">
+      <p class="label">New version</p>
+      <figure>
+        <template class="draw" data-w="1440" data-h="900">
+          ⟪The screen as it should be, in the app's own markup and classes, at the window's size; mark each changed part with class x-new and a data-x label, and stand in for what the drawing leaves out with an element of class x-gap.⟫
+        </template>
+        <figcaption>⟪What changed, part by part.⟫</figcaption>
+      </figure>
+      <p class="note">⟪Why the new version is right: what it fixes, measured against real data, and what it deliberately does not change.⟫</p>
+    </div>
+  </div>
+</section>
+
+<h2>B · ⟪Area name⟫</h2>
+<p class="section-lede">⟪What this area covers, in one sentence.⟫</p>
+
+<section class="finding" id="B1">
+  <header>
+    <div class="meta"><span class="fid">B1</span><span class="tag medium">Medium</span><span class="tag type">Design choice</span></div>
+    <h3>⟪The title⟫</h3>
+  </header>
+  <div class="why">
+    <p>⟪What the design asked for, what it costs the user at real size, and why it should be redone.⟫</p>
+    <p class="design">⟪The design's sentence this questions, quoted.⟫ <i>— ⟪where the design says it⟫</i></p>
+  </div>
+  <div class="cmp">
+    <div class="side now">
+      <p class="label">Current</p>
+      <p class="loc">⟪path:lines⟫</p>
+      <pre><code>⟪the code as it is⟫</code></pre>
+    </div>
+    <div class="side new">
+      <p class="label">New version</p>
+      <figure>
+        <template class="draw" data-w="720">
+          ⟪The part as it should be, in the app's own markup and classes.⟫
+        </template>
+        <figcaption>⟪What changed.⟫</figcaption>
+      </figure>
+      <p class="loc">⟪the component that changes⟫</p>
+      <pre><code>⟪The change to it as a diff: each removed line in a span of class del, each added line in a span of class add.⟫</code></pre>
+      <p class="note">⟪Why the new version is right.⟫</p>
+    </div>
+  </div>
+</section>
+
+<!-- From v2 on, report.md's section for what was re-checked and holds goes here. -->
+
+<section class="appendix" id="coverage">
+  <h2>What was examined</h2>
+  <p class="section-lede">⟪Everything the version examined, so a reader can see that nothing was skipped: each screen and each of its states, or each module and endpoint, with what it showed.⟫</p>
+  <table class="data">
+    <thead><tr><th>Screen and state</th><th>At</th><th>Seen in</th><th>Found</th></tr></thead>
+    <tbody>
+      <tr><td>⟪a screen, in one of its states⟫</td><td>⟪1440 × 900⟫</td><td><a href="shots/⟪what it shows⟫-desktop.png">⟪screenshot⟫</a></td><td><a href="#A1">A1</a></td></tr>
+      <tr><td>⟪a screen, in one of its states⟫</td><td>⟪390 × 844⟫</td><td><a href="shots/⟪what it shows⟫-phone.png">⟪screenshot⟫</a></td><td><a href="#B1">B1</a></td></tr>
+      <tr><td>⟪a screen, in one of its states⟫</td><td>⟪1440 × 900⟫</td><td><a href="shots/⟪what it shows⟫-desktop.png">⟪screenshot⟫</a></td><td>Nothing found</td></tr>
+    </tbody>
+  </table>
+  <p>⟪What was not reached, and why.⟫</p>
+</section>
+
+<section class="appendix" id="cleared">
+  <h2>Checked and sound</h2>
+  <ul>
+    <li>⟪Each item the version cleared, as its records word it.⟫</li>
+  </ul>
+</section>
+
+<section class="appendix" id="out-of-scope">
+  <h2>Left out on purpose</h2>
+  <ul>
+    <li>⟪Each item the design leaves out, and where that was decided.⟫</li>
+  </ul>
+</section>
+
+<!-- Only when the run saw something that belongs to the other audit; otherwise delete this section. -->
+<section class="appendix" id="other-audit">
+  <h2>Left to the ⟪non-UI or UI⟫ audit</h2>
+  <ul>
+    <li>⟪Each thing seen that belongs to the other audit, with where it was seen.⟫</li>
+  </ul>
+</section>
+
+<!-- Only in a report that the report or reconcile mode corrected; otherwise delete this section. -->
+<section class="appendix" id="corrections">
+  <h2>Changed since the first draft</h2>
+  <p class="section-lede">⟪When the first draft was written, and when and why it was corrected.⟫</p>
+  <ul>
+    <li>⟪Each finding withdrawn, split, merged, regraded, moved to the shared report, or cut down to its part in this app, by its ID, and why, linking the shared card that took it.⟫</li>
+  </ul>
+</section>
+
+<section class="appendix" id="capture">
+  <h2>How it was captured</h2>
+  <p>⟪The commit, the data and its size, the build and how it was served, how every paid or external call was refused, and where this audit sits in the project's plan.⟫</p>
+  <pre><code>⟪Every command, in order, so the next version can repeat the capture.⟫</code></pre>
+</section>
+
+</div>
+<script src="report.js"></script>
+</body>
+</html>
