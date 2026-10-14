@@ -144,5 +144,32 @@ for (const surface of ['terminal', 'desktop'] as const) {
       expect(String(svg?.props.source)).toContain('100%')
     }
   })
+
+  test(`${surface}: savvy-advisor is treated as a read-only scout without worker STEP_BRIEF injection`, async ($, on) => {
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    const seenPrompts: Record<string, string> = {}
+    on('agent.spawn', async (_$, e) => {
+      seenPrompts[e.subagentType] = e.prompt
+      return { agentId: `id-${e.subagentType}`, model: 'claude-sonnet-5-5' } as never
+    })
+
+    await $.tool.call({ tool: PROGRESS, title: 'Active flow', phase: 'delegate', total: 2, done: 0 } as never)
+
+    await $.agent.spawn({
+      tool_use_id: 'u1',
+      subagentType: 'savvy-advisor',
+      description: 'Research repo state and fan-out feasibility',
+      prompt: 'Inspect canonical register and fan-out feasibility.',
+    } as never)
+    await $.agent.spawn({
+      tool_use_id: 'u2',
+      subagentType: 'savvy-careful',
+      description: 'Apply step 25',
+      prompt: 'Implement step 25.',
+    } as never)
+
+    expect(seenPrompts['savvy-advisor']).toBe('Inspect canonical register and fan-out feasibility.')
+    expect(seenPrompts['savvy-careful']).toContain('mcp__savvy-progress__step')
+  })
 }
 

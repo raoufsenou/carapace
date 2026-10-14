@@ -2,6 +2,7 @@
 
 An orchestrated delivery flow built around `execution-plan-integrity` and `app-slop-audit`.
 
+- `/savvy-flow prompt [intent]` (or `/savvy-flow` with no arguments) — spawns `savvy-advisor` (read-only) to inspect `.execution-plan-integrity.json`, `docs/execution-plan.md`, `docs/audit/`, and `git` state, evaluate whether upcoming steps can safely run in parallel fan-out mode (`FAN-OUT READY`), need sequential coordinator steps on `main` first (`HYBRID`), or must run sequentially (`SEQUENTIAL ONLY`), and return a copy-ready orchestration prompt.
 - `/savvy-flow init` — in an empty or uninitialized project, sets up `.execution-plan-integrity.json` (schema 2), the canonical execution register (`<!-- execution-role: canonical -->` + `<!-- execution-register:start/end -->`), `docs/execution-proofs/`, and `app-slop-audit`'s `docs/audit/` layout.
 - `/savvy-flow migrate` — in a non-empty project, runs `execution-plan-integrity`'s read-only `audit` and (after maintainer approval) `apply`/`upgrade` migration and `app-slop-audit` `import`/toolkit setup.
 - `/savvy-flow <instruction>` — executes the canonical register's current `NOW` task one step at a time, or forms and runs a maintainer-directed `VALIDATION` `Batch:` across per-app git worktrees using `fanout.mjs`, `savvy-*` workers, adversarial review, and semantic closure proofs.
@@ -9,10 +10,11 @@ An orchestrated delivery flow built around `execution-plan-integrity` and `app-s
 ## What ships
 
 - **Skill** `savvy-flow`: the orchestrator's playbook.
-- **Agents** by task profile (all workers inherit whatever model and effort your agent harness is configured to use — the skill never overrides them):
+- **Agents** by task profile (all subagents inherit whatever model and effort your agent harness is configured to use — the skill never overrides them):
 
   | Agent | For |
   | --- | --- |
+  | `savvy-advisor` | read-only repo state inspection, fan-out feasibility analysis (`FAN-OUT READY` / `HYBRID` / `SEQUENTIAL ONLY` / `BATCH RESUME`), and copy-ready prompt generation |
   | `savvy-fable` | the hardest logic and bugs; targeted design features on request |
   | `savvy-heavy` | unfamiliar code, unclear root cause |
   | `savvy-careful` | delicate changes, multi-step per-app worktree batches |

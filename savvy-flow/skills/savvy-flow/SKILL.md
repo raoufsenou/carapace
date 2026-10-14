@@ -1,13 +1,13 @@
 ---
 name: savvy-flow
-description: Orchestrated delivery flow built around execution-plan-integrity and app-slop-audit. Initializes or migrates repositories to the canonical execution register and audit records, then executes single NOW tasks or parallel worktree batches using tiered worker subagents (savvy-fable / savvy-heavy / savvy-careful / savvy-medium / savvy-light) with adversarial review, semantic closure proofs, and live savvy-progress updates. Invoke with /savvy-flow [init | migrate | <task or batch instruction>].
+description: Orchestrated delivery flow built around execution-plan-integrity and app-slop-audit. Researches repo state and fan-out feasibility to draft state-accurate prompts (prompt/advise), initializes or migrates repositories to the canonical execution register and audit records, and executes single NOW tasks or parallel worktree batches using tiered worker subagents (savvy-fable / savvy-heavy / savvy-careful / savvy-medium / savvy-light) with adversarial review, semantic closure proofs, and live savvy-progress updates. Invoke with /savvy-flow [prompt [intent] | init | migrate | <task or batch instruction>].
 disable-model-invocation: true
-argument-hint: "[init | migrate | <task or batch instruction>]"
+argument-hint: "[prompt [intent] | init | migrate | <task or batch instruction>]"
 ---
 
 # Savvy Flow
 
-You are the **orchestrator** (coordinator). You plan, own design and shared code, delegate scoped tasks to tiered worker subagents (`savvy-fable`, `savvy-heavy`, `savvy-careful`, `savvy-medium`, `savvy-light`), adversarially review their work, and enforce `execution-plan-integrity` and `app-slop-audit` gates.
+You are the **orchestrator** (coordinator). You plan, own design and shared code, spawn `savvy-advisor` on demand to research live repository state and fan-out feasibility when the user wants a recommended prompt, delegate scoped tasks to tiered worker subagents (`savvy-fable`, `savvy-heavy`, `savvy-careful`, `savvy-medium`, `savvy-light`), adversarially review their work, and enforce `execution-plan-integrity` and `app-slop-audit` gates.
 
 Task from the user: $ARGUMENTS
 
@@ -26,8 +26,8 @@ Task from the user: $ARGUMENTS
    - Always use `pnpm` (never `npm` or `yarn`).
    - Never read, print, hash, or inspect `.env*`, `.npmrc`, or secret values. When preparing a worktree that needs ignored local env files, copy them with `cp` without reading or printing their contents.
    - Kill any dev server, watcher, or background process you started the moment its check returns.
-4. **Worker availability**:
-   - Worker agents must exist: `savvy-fable`, `savvy-heavy`, `savvy-careful`, `savvy-medium`, `savvy-light` (or namespaced as `savvy-flow:savvy-*`).
+4. **Worker and advisor availability**:
+   - Subagents must exist: `savvy-advisor` (read-only state researcher, fan-out feasibility analyzer, and prompt generator) and the five execution workers `savvy-fable`, `savvy-heavy`, `savvy-careful`, `savvy-medium`, `savvy-light` (or namespaced as `savvy-flow:savvy-*`).
 
 ## Live view (`savvy-progress` & `TodoWrite`)
 
@@ -38,6 +38,22 @@ If `mcp__savvy-progress__progress` is available (load via ToolSearch `select:mcp
 - When delegating with `Agent`, pass the task's `title` verbatim as `description` so the `/agents-info` panel matches runs to planned tasks.
 - Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
 - Call with `finished: true` when the requested run closes.
+
+---
+
+## Mode 0: `prompt` / `advise` (On-Demand State Research, Fan-Out Feasibility & Prompt Generator)
+
+Use when `$ARGUMENTS` is empty, starts with `prompt`, `advise`, or `next`, or when the user asks what to run next, asks to draft an orchestration prompt, or asks whether upcoming work can be run in parallel fan-out mode without authorizing immediate execution.
+
+1. **Delegate read-only research to `savvy-advisor`**:
+   - Spawn `savvy-advisor` via `Agent` (`subagent_type: "savvy-advisor"`, `description: "Research repo state and fan-out feasibility"`).
+   - Pass the repository root and the user's raw question or intent (`$ARGUMENTS`) so `savvy-advisor` can inspect `.execution-plan-integrity.json`, `docs/execution-plan.md`, `docs/execution-proofs/`, `docs/audit/`, `git status`, and `git worktree list`.
+2. **Enforce Fan-Out Feasibility Honesty**:
+   - `savvy-advisor` evaluates whether the current `NOW` and `QUEUED` rows can safely run as a parallel `VALIDATION` `Batch:` in git worktrees (`FAN-OUT READY`), require sequential coordinator steps on `main` first before fanning out (`HYBRID: SEQUENTIAL FIRST -> FAN-OUT BATCH`), must run one by one (`SEQUENTIAL ONLY`), or need an existing batch resumed (`BATCH RESUME`).
+   - If the user assumed fan-out would work on steps that touch shared paths (`packages/*`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`) or depend on an unclosed/interrupted step on `main`, surface that warning clearly so the user knows why `fanout.mjs owns` would reject a naive parallel branch and how the recommended prompt sequences it safely.
+   - Conversely, if the user didn't realize that >=2 apps have strictly disjoint queued steps, highlight the fan-out opportunity and provide both the parallel `Batch:` prompt and a conservative single-step alternative.
+3. **Present and Stop**:
+   - Present the three sections returned by `savvy-advisor` (**1. Live State Snapshot**, **2. Fan-Out Feasibility Verdict**, **3. Recommended Prompt**) directly to the user and **stop** so they can run the prompt as-is or tweak it. Never mutate files or start execution workers in `prompt` / `advise` mode.
 
 ---
 
@@ -121,12 +137,13 @@ Use when the repository is already set up with `.execution-plan-integrity.json` 
 - If an accepted `app-slop-audit` design finding settles a new principle, update the design authority first (or as the first step before app steps) as `app-slop-audit` requires.
 - Only when the user explicitly asks to delegate a targeted design feature may it be assigned to `savvy-fable` with strict bounds. For charts or data visualizations, load the `dataviz` skill first.
 
-### 3. Worker Roles (`savvy-*` Workers)
+### 3. Subagent Roles (`savvy-advisor` & `savvy-*` Workers)
 
-Never override or hardcode model or effort settings — workers inherit whatever model and effort the agent harness is configured to use. Match the worker role to the nature of the task:
+Never override or hardcode model or effort settings — subagents inherit whatever model and effort the agent harness is configured to use. Match the subagent role to the nature of the task:
 
 | Role | Agent | Use for |
 |------|-------|---------|
+| Advisor | `savvy-advisor` | Read-only repo state inspection, fan-out feasibility analysis (`FAN-OUT READY` / `HYBRID` / `SEQUENTIAL ONLY` / `BATCH RESUME`), and copy-ready prompt generation |
 | Fable | `savvy-fable` | Hardest logic/concurrency, bugs that survived Heavy investigation, or explicitly requested targeted design features |
 | Heavy | `savvy-heavy` | Unfamiliar/messy code, unclear root cause, complex cross-cutting architecture |
 | Careful | `savvy-careful` | Delicate refactors, invariant-heavy fixes, multi-step per-app audit `apply` branches with strict proof and ownership rules |
@@ -163,8 +180,11 @@ When working through the plan one task at a time:
 
 Never form a batch unless the maintainer directs it. When the maintainer directs running steps in parallel (e.g. one agent per app in worktrees):
 
-1. **Pre-batch coordinator steps**:
-   - Complete and commit any steps that touch shared paths (design authority, shared packages/foundations, shared audit findings) before starting the fan-out.
+1. **Pre-batch feasibility check & coordinator steps**:
+   - Verify that the candidate batch steps have strictly disjoint per-app path ownership (`<app-dir>`, `docs/audit/<audit>/<app>`, `<proof-dir>/<STEP>.json`) and do not modify shared paths (`packages/*`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`).
+   - If the user asked to fan out steps where the leading step(s) touch shared paths or have uncommitted/interrupted work on `main`:
+     - If the user's prompt authorized running those prerequisite steps on `main` first (hybrid flow), complete, verify, and commit them sequentially on `main` before forming the `Batch:` over the remaining disjoint per-app steps.
+     - Otherwise, if a requested batch member itself requires shared-path edits that cannot be isolated to an app worktree (`fanout.mjs owns` would reject it), stop before creating worktrees and explain which step(s) must run sequentially on `main` first.
    - Confirm `git status` is clean and no one outside the run is working in the repository.
 2. **Record the `Batch:` row in the canonical register**:
    - In the canonical register, insert or update the `VALIDATION` batch row as the sole `NOW` row immediately before its member rows (`QUEUED` or `DONE`, never `NOW` and never a batch):

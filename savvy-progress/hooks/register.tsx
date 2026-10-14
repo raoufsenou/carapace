@@ -570,7 +570,9 @@ const COSTUMES: Record<string, (f: Fill, t: string) => void> = {
   other: f => crabBody(f),
 }
 
-const costumeOf = (type: string): string => (type === 'Explore' ? 'explore' : tierOf(type))
+const isScout = (type: string): boolean => /^(?:[^:]*:)?(?:Explore|savvy-advisor)$/i.test(type)
+
+const costumeOf = (type: string): string => (isScout(type) ? 'explore' : tierOf(type))
 
 const CRAB_SCALE = 1.1
 
@@ -879,7 +881,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const type = String(e.subagent_type ?? '')
     const cur = await read($, flow)
-    if (!isSavvy(type) && (!cur || cur.isFinished)) return next(e)
+    if (isScout(type) || (!isSavvy(type) && (!cur || cur.isFinished))) return next(e)
 
     await update($, flow, prev => {
       const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
@@ -895,7 +897,7 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const curFlow = await read($, flow)
     const isFlowActive = Boolean(curFlow && !curFlow.isFinished)
-    const isUnbriefed = (isSavvy(e.subagentType) || isFlowActive) && !e.prompt.includes(STEP_TOOL)
+    const isUnbriefed = !isScout(e.subagentType) && (isSavvy(e.subagentType) || isFlowActive) && !e.prompt.includes(STEP_TOOL)
     const started = await next(isUnbriefed ? { ...e, prompt: e.prompt + STEP_BRIEF } : e)
     if (started.deny !== undefined) return started
 

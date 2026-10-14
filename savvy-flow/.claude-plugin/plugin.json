@@ -1,7 +1,7 @@
 {
   "name": "savvy-flow",
   "version": "2.0.0",
-  "description": "Orchestrated delivery flow for execution-plan-integrity and app-slop-audit: initializes or migrates repositories to the canonical execution register and executes single NOW tasks or parallel worktree batches with five tiered worker subagents and live savvy-progress updates.",
+  "description": "Orchestrated delivery flow for execution-plan-integrity and app-slop-audit: researches repo state and fan-out feasibility to generate orchestration prompts (savvy-advisor), initializes or migrates repositories to the canonical execution register, and executes single NOW tasks or parallel worktree batches with five tiered worker subagents and live savvy-progress updates.",
   "author": { "name": "johnnyvizz", "url": "https://github.com/johnnyvizz" },
   "homepage": "https://github.com/johnnyvizz/claude-kit/tree/main/plugins/savvy-flow",
   "repository": "https://github.com/johnnyvizz/claude-kit",
