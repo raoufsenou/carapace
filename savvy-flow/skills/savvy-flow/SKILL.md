@@ -18,7 +18,7 @@ Task from the user: $ARGUMENTS
    - Never create a second live queue (`docs/SPEC.md`, an unclassified `docs/PLAN.md`, `filemap.md`, or task lists inside `CLAUDE.md` / `AGENTS.md`).
    - Every plan-like document in `requiredGlobs` must carry its `<!-- execution-role: canonical|evidence|validation|design|archive -->` marker.
 2. **Audit records and proofs (`app-slop-audit` + `execution-plan-integrity`)**:
-   - Never copy checker code, mutation suites, or `fanout.mjs` into a target repository. Always invoke them from the installed skill directories.
+   - Never copy checker code, mutation suites, or `fanout.mjs` into a target repository. Always invoke them from the installed skill directories (use the canonical skill directory path rather than a symlinked home alias when recording verification commands in proofs).
    - Never mark a task `DONE` without a valid semantic closure proof at `<completionProofs.directory>/<TASK-ID>.json` passing `check-execution-plan.mjs` (and, for `app-slop-audit` fix steps, a fix record at `docs/audit/<audit>/<app>/fixes/<STEP>.json` passing `check-records.mjs`).
 3. **Git and secret safety**:
    - Read repository state (`git status`) before any state-dependent command.
@@ -150,10 +150,11 @@ When working through the plan one task at a time:
      - Delete any temporary measurement scripts outside the committed toolkit.
      - Run `node <app-slop-audit>/assets/checker/check-records.mjs`.
    - Write the closure proof `<completionProofs.directory>/<TASK-ID>.json` following `execution-plan-integrity/references/completion-proof.md`:
-     - Freeze stable requirement IDs (`REQ-...`), sources, repository evidence (`path`, `symbol`), and verification (`kind`, `command`/`evidence`/`record`, `result: "passed"`, `checkedAt`). When an `app-slop-audit` fix file already proves a requirement, cite that fix file in `verification[].record` with a one-line summary instead of restating it.
-     - For `IMPLEMENTATION`, `MIGRATION`, or `OPERATIONS`, include `implementationLedger`, `integration` (`entryPoint`, `implementation`, `consumer`), `falsification`, and `implementationDisposition: { "status": "DELIVERED" }`.
-     - For `DESIGN`, `DECISION`, `VALIDATION`, or `DOCUMENTATION`, set `implementationDisposition` to `TRACKED` (with `taskIds`) or `NOT-REQUIRED` (with `reason` and `source`).
-     - Preserve the task's register row verbatim on one line in `closedRow`, and any working notes removing from the canonical doc in `notes`.
+     - Set `schema: 1`, `taskId`, `taskKind`, `completedAt` (`YYYY-MM-DD`), and `outcome` matching `taskKind` (`IMPLEMENTATION` -> `IMPLEMENTED`, `MIGRATION` -> `MIGRATED`, `OPERATIONS` -> `OPERATING`, `DESIGN` -> `DESIGNED`, `DECISION` -> `DECIDED`, `VALIDATION` -> `VALIDATED`, `DOCUMENTATION` -> `DOCUMENTED`).
+     - Freeze stable requirement IDs (`REQ-...`), sources (`{ path, anchor }`), repository evidence (`[{ path, symbol }]`), and verification (`[{ kind, command|evidence|record, result: "passed", checkedAt }]` where `kind` is strictly one of `test | mutation | inspection | manual | external | static` — never `"command"`). When an `app-slop-audit` fix file already proves a requirement, cite that fix file in `verification[].record` with a one-line summary instead of restating it.
+     - For `IMPLEMENTATION`, `MIGRATION`, or `OPERATIONS`, include `implementationLedger` (`string[]` of repo-relative file paths), `integration` (`[{ entryPoint, implementation, consumer }]` where `implementation` starts with an existing repo-relative file path, optionally followed by `#symbol`), `falsification` (`[{ assertion, kind, evidence, result: "passed" }]` where `kind` is one of `test | mutation | inspection | manual | external | static`), and `implementationDisposition: { "status": "DELIVERED" }`.
+     - For `DESIGN`, `DECISION`, `VALIDATION`, or `DOCUMENTATION`, set `implementationDisposition` to `TRACKED` (with `taskIds` naming implementation-like register tasks) or `NOT-REQUIRED` (with `reason` and `source: { path, anchor }`).
+     - Preserve the task's register row verbatim on one line in `closedRow`, and any working notes removed from the canonical doc in `notes`.
    - Run `execution-register.test.mjs`, `check-execution-plan.mjs --root <repo>`, and the narrow repository verification gates.
    - **Atomic state advance**: Only after all proofs and gates pass, update the task row to `DONE` in the canonical register (reducing it to a one-line summary whose last cell starts with `Completed YYYY-MM-DD; <proof-path>.` and removing working notes now stored in `notes`) and advance `NOW` to the next ordered row (or `IDLE` / `NONE`) in the same pass.
    - Re-run `check-execution-plan.mjs --root <repo>`, update `mcp__savvy-progress__progress` (`done`), commit if authorized, and continue to the next step if the user asked to keep going across steps.

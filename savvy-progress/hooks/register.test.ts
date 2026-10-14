@@ -122,6 +122,27 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'savvy-agents', props: pane })
     expect(await panelUi.find({ text: /Planned · 1/ })).toBeDefined()
+
+    // Even if a manual progress flow is active, reaching NOW: NONE in the canonical register finishes the bar.
+    await $.tool.call({ tool: PROGRESS, title: 'Execute UI-APPLY-BATCH-1', phase: 'review', total: 2, done: 1 } as never)
+    canonicalMd = `<!-- execution-role: canonical -->
+<!-- execution-register:start -->
+\`NOW\`: \`NONE\`
+
+| Order | ID | Kind | State | Work and completion boundary | Source or evidence |
+| --- | --- | --- | --- | --- | --- |
+| 1 | \`UI-APPLY-23\` | \`IMPLEMENTATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-23.json. | Audit v1 |
+| 2 | \`UI-APPLY-BATCH-1\` | \`VALIDATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-BATCH-1.json. | Audit v1 |
+<!-- execution-register:end -->`
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
+    const bar3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    if (surface === 'terminal') {
+      expect(await bar3.find({ text: /Done/ })).toBeDefined()
+    } else {
+      const svg = await bar3.find({ type: 'Svg' })
+      expect(String(svg?.props.source)).toContain('Done')
+      expect(String(svg?.props.source)).toContain('100%')
+    }
   })
 }
 

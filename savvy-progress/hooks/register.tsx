@@ -727,8 +727,6 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
 }
 
 async function syncRegister($: EngineInterface): Promise<void> {
-  const current = await read($, flow)
-  if (current && !current.isFinished && !current.isFromRegister) return
   try {
     const rawCfg = await $.fs.read(REGISTER_CONFIG)
     const cfg = JSON.parse(rawCfg) as { canonical?: unknown }
@@ -736,6 +734,13 @@ async function syncRegister($: EngineInterface): Promise<void> {
     const md = await $.fs.read(cfg.canonical.trim())
     const parsed = parseRegister(md)
     if (!parsed) return
+    const current = await read($, flow)
+    if (current && !current.isFinished && !current.isFromRegister) {
+      if (parsed.finished) {
+        await update($, flow, prev => (prev ? { ...prev, done: prev.total, phase: 'close', isFinished: true } : prev))
+      }
+      return
+    }
     await update($, flow, prev => {
       const merged = merge(prev, parsed)
       return { ...merged, running: prev ? prev.running : 0, isFromRegister: true }
