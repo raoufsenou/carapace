@@ -1,6 +1,7 @@
 # Local launcher & Claude home config
 scripts/
 .claude-home/
+artifact/
 
 # OS & editor artifacts
 .DS_Store
