@@ -8,11 +8,11 @@ async function session($: Engine, on: On) {
   mock.clock(on, { now: Date.parse('2026-10-10T02:00:00Z') })
   on('session.start', async () => ({ cwd: '/repo' }) as never)
   await $.session.start({ source: 'startup', cwd: '/repo', surface: 'terminal', isInteractive: true } as never)
-  await $.tool.call({ tool: 'mcp__savvy-progress__progress', title: 'Ship it', total: 4, done: 1, phase: 'delegate' } as never)
+  await $.tool.call({ tool: 'mcp__carapace__progress', title: 'Ship it', total: 4, done: 1, phase: 'delegate' } as never)
 }
 
 async function band($: Engine, surface: 'terminal' | 'desktop') {
-  const ui = await $.ui.mount({ plugin: 'savvy-progress', surface, ...BAND })
+  const ui = await $.ui.mount({ plugin: 'carapace', surface, ...BAND })
   const svg = await ui.findAll({ type: 'Svg' })
   const title = await ui.findAll({ type: 'Text', text: /^Ship it$/ })
   const label = await ui.findAll({ type: 'Text', text: /^Tasks 1\/4$/ })

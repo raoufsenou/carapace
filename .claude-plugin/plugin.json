@@ -1,0 +1,26 @@
+{
+  "name": "carapace",
+  "version": "2.0.0",
+  "description": "Self-contained Claude Code plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, six carapace-* subagents, and the live AbovePrompt progress bar and /agents-info panel.",
+  "author": { "name": "raouf" },
+  "license": "MIT",
+  "keywords": [
+    "mod",
+    "skill",
+    "orchestration",
+    "subagents",
+    "progress",
+    "execution-plan-integrity",
+    "app-slop-audit",
+    "carapace"
+  ],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "autoOpen": {
+      "type": "string",
+      "title": "Open the Agents panel by itself",
+      "description": "carapace (when a carapace worker starts or a plan is reported) or any (when any subagent starts)",
+      "default": "carapace"
+    }
+  }
+}

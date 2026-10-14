@@ -3,18 +3,18 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Flow, Panel, Phase, PlannedTask } from '../types'
 
-const flow = atom({ plugin: 'savvy-progress', key: 'flow' } as const, null)
-const agents = atom({ plugin: 'savvy-progress', key: 'agents' } as const, [])
-const panel = atom({ plugin: 'savvy-progress', key: 'panel' } as const, {
+const flow = atom({ plugin: 'carapace', key: 'flow' } as const, null)
+const agents = atom({ plugin: 'carapace', key: 'agents' } as const, [])
+const panel = atom({ plugin: 'carapace', key: 'panel' } as const, {
   isCompact: false,
   isDoneCollapsed: false,
   autoOpenedFor: '',
 })
-const now = atom({ plugin: 'savvy-progress', key: 'now' } as const, 0)
+const now = atom({ plugin: 'carapace', key: 'now' } as const, 0)
 
-const TOOL = 'mcp__savvy-progress__progress'
-const STEP_TOOL = 'mcp__savvy-progress__step'
-// Added to the end of each worker's brief during a flow or savvy-* run. Their system
+const TOOL = 'mcp__carapace__progress'
+const STEP_TOOL = 'mcp__carapace__step'
+// Added to the end of each worker's brief during a flow or carapace-* run. Their system
 // prompt words step reporting as a condition ("if the step tool appears among your tools")
 // and they skip it even with the tool listed; the same request in the brief is followed.
 const STEP_BRIEF = `
@@ -23,7 +23,7 @@ Progress reporting: before any other work, call \`${STEP_TOOL}\` with \`total\` 
 const REGISTER_CONFIG = '.execution-plan-integrity.json'
 const REGISTER_START = '<!-- execution-register:start -->'
 const REGISTER_END = '<!-- execution-register:end -->'
-const PANE = 'savvy-agents'
+const PANE = 'carapace-agents'
 const PHASES: readonly Phase[] = ['plan', 'design', 'delegate', 'review', 'close']
 const TIERS: readonly string[] = ['fable', 'heavy', 'careful', 'medium', 'light']
 // The tools' schemas are advice to the model, not a check: what a call may ask
@@ -80,7 +80,7 @@ const tierWord = (tier: string): string => (STRINGS.tier as Record<string, strin
 const effortWord = (effort: string): string => (STRINGS.effort as Record<string, string>)[effort] ?? effort
 
 const blank = (): Flow => ({
-  title: 'savvy-flow',
+  title: 'carapace',
   total: 0,
   done: 0,
   running: 0,
@@ -94,7 +94,7 @@ const isNewFlow = (prev: Flow | null, input: ProgressInput): boolean =>
 
 // Only a known tier is kept: the name is later a key into the tier tables.
 const tierName = (v: string): string => {
-  const t = v.replace(/^savvy-/, '').trim().toLowerCase()
+  const t = v.replace(/^carapace-/, '').trim().toLowerCase()
   return TIERS.includes(t) ? t : ''
 }
 
@@ -263,7 +263,7 @@ const TIER_COLOR: Record<string, string> = {
   other: '#888780',
 }
 
-// What each savvy tier uses for its accent color.
+// What each carapace tier uses for its accent color.
 const colorOf = (tier: string): string => TIER_COLOR[tier] ?? '#888780'
 
 // The model and effort reported by the harness for a running or finished subagent.
@@ -323,14 +323,14 @@ const costOf = (model: string, u: Usage, isRequest: boolean): number => {
 // Haiku 4.5 and the Claude 3 models have a 200K window; the rest, Haiku 5.5 included, 1M.
 const windowOf = (model: string): number => (/haiku-4|claude-3/i.test(model) ? 200_000 : 1_000_000)
 
-// `savvy-careful`, or `savvy-flow:savvy-careful` when the agents ship in a plugin.
+// `carapace-careful`, or `carapace:carapace-careful` when the agents ship in a plugin.
 const tierOf = (type: string): string => {
   const bare = type.replace(/^[^:]*:/, '')
-  const t = bare.replace(/^savvy-/, '').toLowerCase()
-  return Object.hasOwn(TIER_COLOR, t) && bare.startsWith('savvy-') ? t : 'other'
+  const t = bare.replace(/^carapace-/, '').toLowerCase()
+  return Object.hasOwn(TIER_COLOR, t) && bare.startsWith('carapace-') ? t : 'other'
 }
 
-const isSavvy = (type: string): boolean => tierOf(type) !== 'other'
+const isCarapace = (type: string): boolean => tierOf(type) !== 'other'
 
 type RegisterRow = {
   order: number
@@ -570,7 +570,7 @@ const COSTUMES: Record<string, (f: Fill, t: string) => void> = {
   other: f => crabBody(f),
 }
 
-const isScout = (type: string): boolean => /^(?:[^:]*:)?(?:Explore|savvy-advisor)$/i.test(type)
+const isScout = (type: string): boolean => /^(?:[^:]*:)?(?:Explore|carapace-advisor)$/i.test(type)
 
 const costumeOf = (type: string): string => (isScout(type) ? 'explore' : tierOf(type))
 
@@ -759,7 +759,7 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'progress',
       description:
-        'Report /savvy-flow progress to the progress bar above the prompt and the agents panel. ' +
+        'Report /carapace progress to the progress bar above the prompt and the agents panel. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
         'when switching phase or re-planning (tasks), and once at the end with finished: true. Fields left out keep their previous value. ' +
         'For the main session only: a call from a subagent is ignored (workers report with `step`).',
@@ -791,7 +791,7 @@ export const register: Register = (on, options) => {
     await $.tool.register({
       name: 'step',
       description:
-        'For savvy-flow workers: report progress on your own task to the agents panel. ' +
+        'For carapace workers: report progress on your own task to the agents panel. ' +
         'Right after reading the brief, call it with `total` (your plan in 3-8 steps) and `done: 0`; ' +
         'call it again as each step finishes. Cheap and silent: it only draws a bar.',
       inputSchema: {
@@ -881,7 +881,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const type = String(e.subagent_type ?? '')
     const cur = await read($, flow)
-    if (isScout(type) || (!isSavvy(type) && (!cur || cur.isFinished))) return next(e)
+    if (isScout(type) || (!isCarapace(type) && (!cur || cur.isFinished))) return next(e)
 
     await update($, flow, prev => {
       const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
@@ -897,7 +897,7 @@ export const register: Register = (on, options) => {
   on('agent.spawn', async ($, e, next) => {
     const curFlow = await read($, flow)
     const isFlowActive = Boolean(curFlow && !curFlow.isFinished)
-    const isUnbriefed = !isScout(e.subagentType) && (isSavvy(e.subagentType) || isFlowActive) && !e.prompt.includes(STEP_TOOL)
+    const isUnbriefed = !isScout(e.subagentType) && (isCarapace(e.subagentType) || isFlowActive) && !e.prompt.includes(STEP_TOOL)
     const started = await next(isUnbriefed ? { ...e, prompt: e.prompt + STEP_BRIEF } : e)
     if (started.deny !== undefined) return started
 
@@ -922,9 +922,9 @@ export const register: Register = (on, options) => {
       return [...list.filter(a => a.id !== run.id), run].slice(-200)
     })
     await update($, now, () => at)
-    if (isSavvy(e.subagentType) || isFlowActive) {
+    if (isCarapace(e.subagentType) || isFlowActive) {
       const f = await read($, flow)
-      await autoOpen($, f && !f.isFinished ? f.title : 'savvy-flow')
+      await autoOpen($, f && !f.isFinished ? f.title : 'carapace')
     } else if (options.autoOpen === 'any') {
       await autoOpen($, 'any-agent')
     }
@@ -1188,12 +1188,12 @@ export const register: Register = (on, options) => {
     const crew = list.length + plannedOf(f, list).length
     const isWorking = list.some(a => a.status === 'running')
     const crewButton = (
-      <Button key="savvy-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
+      <Button key="carapace-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
     const percent = `${Math.round(ratio(f) * 100)}%`
     const dismiss = (
       <Button
-        key="savvy-dismiss"
+        key="carapace-dismiss"
         label="✕"
         plain
         role="dismiss"

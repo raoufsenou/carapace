@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-const PLUGIN = 'savvy-progress'
-const PROGRESS = 'mcp__savvy-progress__progress'
+const PLUGIN = 'carapace'
+const PROGRESS = 'mcp__carapace__progress'
 
 const band = { hasSurvey: false, isWorking: false, maxRows: 4, bodyColumns: 100, scroll: { offset: 0, bodyRows: 4 }, view: {} }
 const pane = { title: '', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } as const
@@ -30,10 +30,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     // Two planned tasks, none started: the crew button counts both.
-    expect((await ui.find({ key: 'savvy-agents' }))?.props.label).toBe('×2')
+    expect((await ui.find({ key: 'carapace-agents' }))?.props.label).toBe('×2')
 
     await $.tool.call({ tool: PROGRESS, done: 1 } as never)
-    expect(opened).toEqual(['savvy-agents'])
+    expect(opened).toEqual(['carapace-agents'])
     expect(await $.tool.call({ tool: PROGRESS, finished: true } as never)).toMatchObject({ result: 'ok: Done' })
   })
 
@@ -49,9 +49,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(reported).toMatchObject({ result: 'ok: Tasks 0/200' })
 
     const bar = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
-    expect((await bar.find({ key: 'savvy-agents' }))?.props.label).toBe('×200')
+    expect((await bar.find({ key: 'carapace-agents' }))?.props.label).toBe('×200')
 
-    const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'savvy-agents', props: pane })
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
     expect(await ui.find({ text: /Planned · 200/ })).toBeDefined()
     const drawn = (await ui.findAll({ type: 'Svg' })).map(el => String(el.props.source)).join('')
     expect(drawn).not.toContain('native code')
@@ -100,7 +100,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const bar1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     // 2 pending tasks (UI-APPLY-24-VERIFIER + UI-APPLY-25-WEB) appear in the crew count.
-    expect((await bar1.find({ key: 'savvy-agents' }))?.props.label).toBe('×2')
+    expect((await bar1.find({ key: 'carapace-agents' }))?.props.label).toBe('×2')
 
     // Transition step 24 to DONE and form a Batch over step 25.
     canonicalMd = `<!-- execution-role: canonical -->
@@ -118,9 +118,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
 
     const bar2 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
-    expect((await bar2.find({ key: 'savvy-agents' }))?.props.label).toBe('×1')
+    expect((await bar2.find({ key: 'carapace-agents' }))?.props.label).toBe('×1')
 
-    const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'savvy-agents', props: pane })
+    const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
     expect(await panelUi.find({ text: /Planned · 1/ })).toBeDefined()
 
     // Even if a manual progress flow is active, reaching NOW: NONE in the canonical register finishes the bar.
@@ -145,7 +145,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     }
   })
 
-  test(`${surface}: savvy-advisor is treated as a read-only scout without worker STEP_BRIEF injection`, async ($, on) => {
+  test(`${surface}: carapace-advisor is treated as a read-only scout without worker STEP_BRIEF injection`, async ($, on) => {
     on('ui.open', () => ({ value: { isPlaced: true } }))
     const seenPrompts: Record<string, string> = {}
     on('agent.spawn', async (_$, e) => {
@@ -157,19 +157,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     await $.agent.spawn({
       tool_use_id: 'u1',
-      subagentType: 'savvy-advisor',
+      subagentType: 'carapace-advisor',
       description: 'Research repo state and fan-out feasibility',
       prompt: 'Inspect canonical register and fan-out feasibility.',
     } as never)
     await $.agent.spawn({
       tool_use_id: 'u2',
-      subagentType: 'savvy-careful',
+      subagentType: 'carapace-careful',
       description: 'Apply step 25',
       prompt: 'Implement step 25.',
     } as never)
 
-    expect(seenPrompts['savvy-advisor']).toBe('Inspect canonical register and fan-out feasibility.')
-    expect(seenPrompts['savvy-careful']).toContain('mcp__savvy-progress__step')
+    expect(seenPrompts['carapace-advisor']).toBe('Inspect canonical register and fan-out feasibility.')
+    expect(seenPrompts['carapace-careful']).toContain('mcp__carapace__step')
   })
 }
 
