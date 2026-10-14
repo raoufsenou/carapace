@@ -76,7 +76,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
   test(`${surface}: syncs automatically with .execution-plan-integrity.json canonical register (single NOW and Batch)`, async ($, on) => {
     let canonicalMd = `<!-- execution-role: canonical -->
 <!-- execution-register:start -->
-- \`NOW\`: \`UI-APPLY-24-VERIFIER\`
+\`NOW\`: \`UI-APPLY-24-VERIFIER\`
 
 | Order | ID | Kind | State | Work and completion boundary | Source or evidence |
 | --- | --- | --- | --- | --- | --- |

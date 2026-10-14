@@ -73,7 +73,7 @@ Use when `$ARGUMENTS` starts with `init`, or when initializing a new project fro
 3. **Set up `app-slop-audit`**:
    - Ensure `docs/audit/*/*/reports/` is in `.gitignore`.
    - Create the git-tracked audit toolkit directory (e.g. `tools/audit/`) when an app is ready to be audited.
-   - If the user named the app(s) and confirmed severity definitions (`high`, `medium`, `low`) and `designAuthority`, write `docs/audit/ui/<app>/config.json` (and/or `docs/audit/non-ui/<app>/config.json`) following `app-slop-audit/references/records.md`. If severity definitions are not yet given, ask the user before writing `config.json`.
+   - If the user named the app(s) and confirmed severity definitions (`high`, `medium`, `low`) and `designAuthority`, write `docs/audit/ui/<app>/config.json` (and/or `docs/audit/non-ui/<app>/config.json`) following `app-slop-audit/references/records.md` (note: audit version files are named `v<N>.json` such as `v1.json`, verdicts are `v<N>-verdicts.json`, and finding IDs match `^F[1-9]\d*$` such as `F1`, `F2`). If severity definitions are not yet given, ask the user before writing `config.json`.
 4. **Verify**:
    - Run `execution-plan-integrity`'s `execution-register.test.mjs` and `check-execution-plan.mjs --root <repo>`.
    - If any `docs/audit/` configs were created, run `app-slop-audit`'s `check-records.mjs`.

@@ -358,7 +358,7 @@ const parseRegister = (md: string): ProgressInput | null => {
   const end = md.indexOf(REGISTER_END)
   if (start === -1 || end === -1 || end <= start) return null
   const block = md.slice(start + REGISTER_START.length, end)
-  const nowMatch = /^\s*-\s*`NOW`\s*:\s*`([^`\n]+)`/m.exec(block)
+  const nowMatch = /^\s*(?:-\s*)?`NOW`\s*:\s*`([^`\n]+)`/m.exec(block)
   if (!nowMatch?.[1]) return null
   const nowId = nowMatch[1].trim()
 
