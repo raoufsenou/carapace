@@ -1,0 +1,7 @@
+interface:
+  display_name: "Execution Plan Integrity"
+  short_description: "Enforce trustworthy plans and DONE proofs"
+  default_prompt: "Use $execution-plan-integrity as the sole checker to audit, migrate, or verify this repository's canonical plan and refuse any DONE claim not proven against current requirements and implementation."
+
+policy:
+  allow_implicit_invocation: true
