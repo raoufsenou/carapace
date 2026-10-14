@@ -28,13 +28,29 @@ Users often do not know every file path, register invariant, interrupted proof s
 3. Run `git status --short --branch`, `git log -n 5 --oneline`, and `git worktree list`.
 4. **Detect interrupted / mid-close work on disk**:
    - Check whether the current `NOW` step (or any `QUEUED` step) already has uncommitted source edits, a fix file at `docs/audit/<audit>/<app>/fixes/<STEP>.json`, or a closure proof at `<completionProofs.directory>/<STEP>.json` sitting on disk from an earlier session that ended before atomic register closure.
-5. Check `docs/audit/` (e.g. `docs/audit/ui/`, `docs/audit/non-ui/`) for:
-   - Per-app `config.json` (`app`, `appDir`, `toolkit`, `standards.designAuthority`);
-   - Audit rounds (`v1.json`, `v1-verdicts.json`, etc.) and existing `fixes/<STEP>.json` records.
+5. Check `docs/audit/` (e.g. `docs/audit/ui/`, `docs/audit/non-ui/`) for the full `app-slop-audit` lifecycle state:
+   - Per-app `config.json` (`app`, `appDir`, `toolkit`, `standards.designAuthority`, `standards.severities`);
+   - Audit rounds (`v1.json`, `v2.json`, ...) and HTML reports (`reports/v<N>/review.html`);
+   - Shared audit records (`docs/audit/<audit>/shared/v<N>.json`) when >=2 apps share code;
+   - Verdicts (`v<N>-verdicts.json`, `v<N>-verdicts-2.json`) — check whether the latest `v<N>.json` has undecided `open` findings or unanswered reopen proposals;
+   - Existing `fixes/<STEP>.json` records — check whether `accepted` findings in `v<N>-verdicts.json` are already queued in `docs/execution-plan.md` or still need to be added to the canonical register.
 
-### 2. Analyze Fan-Out Feasibility (Parallel Batch vs. Sequential vs. Hybrid)
+### 2. Determine Lifecycle Stage & Analyze Fan-Out Feasibility
 
-Never blindly agree that work can or cannot be done in fan-out mode. Verify against `app-slop-audit`'s `fanout.mjs owns <branch> <owned-path>...` contract and `execution-plan-integrity`'s `Batch:` rules:
+First identify which stage the repository is in across `execution-plan-integrity` and `app-slop-audit`:
+
+- **Stage A — Uninitialized or Pre-Canonical Repo**:
+  - No `.execution-plan-integrity.json` -> recommend `/savvy-flow init` (empty repo) or `/savvy-flow migrate` (existing docs/plans/audits).
+- **Stage B — `app-slop-audit` Audit / Reconcile / Decide Stage**:
+  - **Audit needed** (`config.json` exists without `v1.json`, `NOW` is `IDLE` waiting for an audit, or the user asks to run a UI/non-UI audit):
+    - Evaluate **Audit Fan-Out Feasibility**: If >=2 apps are being audited in the same audit (`ui` or `non-ui`), recommend a **Multi-App Audit Fan-Out** (`/savvy-flow audit <ui|non-ui> <app1>, <app2>`) where the coordinator confirms severities, builds & serves each app on isolated ports, spawns one `savvy-heavy`/`savvy-careful` worker per app to write `docs/audit/<audit>/<app>/v<N>.json` + `reports/v<N>/review.html`, and then runs `reconcile`. If only 1 app is targeted, recommend a **Single-App Audit**.
+  - **Reconcile needed** (>=2 apps have a latest `v<N>.json` with no verdicts yet, and shared code in `packages/*` has not been reconciled into `docs/audit/<audit>/shared/v<N>.json`):
+    - Recommend `/savvy-flow reconcile <ui|non-ui>` before recording verdicts (`app-slop-audit` forbids combining `reconcile` and `decide` in one pass).
+  - **Verdicts (`decide`) needed** (latest `v<N>.json` has undecided `open` findings or reopen proposals and no `v<N>-verdicts.json`):
+    - Note that `decide` is always **Sequential Only (Single Session)** because the maintainer answers one question at a time (`shared` findings first, then per-app), and recommend `/savvy-flow decide <ui|non-ui> [app]` to record `v<N>-verdicts.json`, update `standards.designAuthority`, and queue accepted findings into `docs/execution-plan.md`.
+- **Stage C — Plan Execution / `app-slop-audit` `apply` Stage (`NOW` / `QUEUED` rows in `docs/execution-plan.md`)**:
+
+Never blindly agree that implementation/fix work can or cannot be done in fan-out mode. Verify against `app-slop-audit`'s `fanout.mjs owns <branch> <owned-path>...` contract and `execution-plan-integrity`'s `Batch:` rules:
 
 - **Why fan-out fails when misused**: `fanout.mjs owns` rejects any worker branch that modifies a file outside its owned path list (`<appDir>`, `docs/audit/<audit>/<app>`, and its assigned `<completionProofs.directory>/<STEP>.json`). Any step touching shared packages (`packages/*`), design authority (`docs/design-authority.md`), the audit toolkit (`tools/audit/`), root configs/lockfiles (`package.json`, `pnpm-lock.yaml`, `tsconfig*`), `docs/audit/<audit>/shared/`, or `docs/execution-plan.md` **cannot** run inside a per-app worktree branch.
 - Inspect the `NOW` row and all upcoming `QUEUED` rows (reading their `Work and completion boundary`, `Source or evidence`, and referenced audit findings if needed) and classify every step:

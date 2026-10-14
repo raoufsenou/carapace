@@ -1,13 +1,13 @@
 ---
 name: savvy-flow
-description: Orchestrated delivery flow built around execution-plan-integrity and app-slop-audit. Researches repo state and fan-out feasibility to draft state-accurate prompts (prompt/advise), initializes or migrates repositories to the canonical execution register and audit records, and executes single NOW tasks or parallel worktree batches using tiered worker subagents (savvy-fable / savvy-heavy / savvy-careful / savvy-medium / savvy-light) with adversarial review, semantic closure proofs, and live savvy-progress updates. Invoke with /savvy-flow [prompt [intent] | init | migrate | <task or batch instruction>].
+description: Orchestrated delivery flow built around execution-plan-integrity and app-slop-audit. Researches repo state and fan-out feasibility to draft state-accurate prompts (prompt/advise), initializes or migrates repositories to the canonical execution register and audit records, drives the full app-slop-audit lifecycle (audit, reconcile, report, decide/verdicts with automatic register queuing), and executes single NOW tasks or parallel worktree batches using tiered worker subagents (savvy-fable / savvy-heavy / savvy-careful / savvy-medium / savvy-light) with adversarial review, semantic closure proofs, and live savvy-progress updates. Invoke with /savvy-flow [prompt | init | migrate | audit | reconcile | report | decide | <task or batch instruction>].
 disable-model-invocation: true
-argument-hint: "[prompt [intent] | init | migrate | <task or batch instruction>]"
+argument-hint: "[prompt [intent] | init | migrate | audit [ui|non-ui] <app...> | reconcile [ui|non-ui] | report [ui|non-ui] <app> | decide [ui|non-ui] [app] | <task or batch instruction>]"
 ---
 
 # Savvy Flow
 
-You are the **orchestrator** (coordinator). You plan, own design and shared code, spawn `savvy-advisor` on demand to research live repository state and fan-out feasibility when the user wants a recommended prompt, delegate scoped tasks to tiered worker subagents (`savvy-fable`, `savvy-heavy`, `savvy-careful`, `savvy-medium`, `savvy-light`), adversarially review their work, and enforce `execution-plan-integrity` and `app-slop-audit` gates.
+You are the **orchestrator** (coordinator). You plan, own design and shared code, spawn `savvy-advisor` on demand to research live repository state and fan-out feasibility when the user wants a recommended prompt, drive both `execution-plan-integrity` and `app-slop-audit` across their full lifecycles, delegate scoped tasks to tiered worker subagents (`savvy-fable`, `savvy-heavy`, `savvy-careful`, `savvy-medium`, `savvy-light`), adversarially review their work, and enforce `execution-plan-integrity` and `app-slop-audit` gates.
 
 Task from the user: $ARGUMENTS
 
@@ -116,6 +116,47 @@ Use when `$ARGUMENTS` starts with `migrate`, or when the user asks to onboard an
      5. Clear copied execution state from `AGENTS.md` / `CLAUDE.md` and add the canonical pointer instruction.
      6. Run `execution-register.test.mjs` and `check-execution-plan.mjs --root <repo>`, close the migration task with its own proof, and re-run the checker.
    - If prior audit reports exist without `docs/audit/` records, run `app-slop-audit` `Mode: import` (and set up the toolkit if missing), then verify with `check-records.mjs --report`.
+
+---
+
+## Mode 2B: `audit` / `reconcile` / `report` / `decide` (Full `app-slop-audit` Lifecycle)
+
+Use when `$ARGUMENTS` starts with `audit`, `reconcile`, `report`, `decide`, or `verdicts`, or when the user asks to run a UI or non-UI slop audit, reconcile multi-app findings, rewrite an audit report, or record verdicts and queue accepted fixes into the canonical execution register.
+
+Always read `app-slop-audit/SKILL.md`, `references/records.md`, and the mode's reference (`references/ui.md` or `references/non-ui.md`, `references/report.md`, `references/fixing.md`) before starting. Never combine `audit`, `report`, or `reconcile` with `decide` or `apply` in one uninterrupted pass — an audit always stops for the maintainer's verdicts.
+
+1. **`audit [ui|non-ui] <app1[, app2, ...]>` (Run v1 or Next Version vN Audit)**:
+   - Default to `ui` unless `non-ui` is specified.
+   - Ensure `docs/audit/*/*/reports/` is in `.gitignore` and the committed toolkit directory named by `config.json` (e.g. `tools/audit/`) exists. If an app has no `config.json` yet, confirm severity definitions (`high`, `medium`, `low`) and `standards.designAuthority` with the maintainer one question at a time before writing `docs/audit/<audit>/<app>/config.json`.
+   - **Single-app run**:
+     - Follow `app-slop-audit` `Mode: audit` steps 1–9: record `git rev-parse --short HEAD`, tidy earlier report folders, capture from a production build at real-use dimensions into `docs/audit/<audit>/<app>/reports/v<N>/`, re-check every earlier non-rejected/non-obsolete finding first, inspect for new findings (`F1`, `F2`, ...), record cleared items, write `docs/audit/<audit>/<app>/reports/v<N>/review.html` from `app-slop-audit/assets/report/review.html` and `docs/audit/<audit>/<app>/v<N>.json`, verify with `node <app-slop-audit>/assets/checker/check-records.mjs <audit> <app> --report`, kill any server started for capture, and **stop** with the summary and framed decision questions.
+   - **Multi-app fan-out (`<app1>, <app2>, ...`)**:
+     - Follow `app-slop-audit/SKILL.md` (`One app or several`):
+       1. Confirm `git status` is clean and no one outside the run is working in the repo; record the audit fan-out in the canonical execution register (`docs/execution-plan.md`).
+       2. Confirm severity definitions for any app missing `config.json` upfront so no worker has to ask.
+       3. Build each app at the audited commit one after another and serve each on its own isolated port with its own data copy (and external/paid calls pointed at a refusing address), recording each server's PID.
+       4. Update `mcp__savvy-progress__progress` (`title: "Audit <audit> (<apps>)"`, `phase: "delegate"`, `tasks`) and spawn one `savvy-heavy` or `savvy-careful` worker per app concurrently. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers to the coordinator.
+       5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html`), run `node <app-slop-audit>/assets/checker/check-records.mjs <audit> --report`, and **stop** presenting the shared report and each app's report, followed by the decisions needed (shared findings first).
+
+2. **`reconcile [ui|non-ui]` (Deduplicate Shared Findings Across Apps)**:
+   - Follow `app-slop-audit` `Mode: reconcile` steps 1–8 across all apps whose latest `v<N>.json` has not yet been reconciled and has no verdicts yet.
+   - Move findings whose change belongs in shared code (`packages/*`) into `docs/audit/<audit>/shared/v<N>.json` (and `shared/config.json` on v1), update each app's `v<N>.json` (`withdrawn` with `shared` or cut down to its local part), write `docs/audit/<audit>/shared/reports/v<N>/review.html` and rewrite each corrected app report, verify with `check-records.mjs <audit> --report`, and **stop** for verdicts.
+
+3. **`report [ui|non-ui] <app>` (Rewrite Latest Report Without New Version or Server)**:
+   - Follow `app-slop-audit` `Mode: report` steps 1–8 from existing captures and records before any verdicts exist on the latest version. Verify with `check-records.mjs <audit> <app> --report` and **stop**.
+
+4. **`decide [ui|non-ui] [app]` / `verdicts` (Record Verdicts + Queue Accepted Steps in Canonical Register)**:
+   - Follow `app-slop-audit` `Mode: decide`:
+     1. Walk through open findings and reopen proposals with the maintainer (if `docs/audit/<audit>/shared/` exists, decide `shared` findings first in `docs/audit/<audit>/shared/v<N>-verdicts.json`, then each app's in `docs/audit/<audit>/<app>/v<N>-verdicts.json`).
+     2. Record each decision (`accepted` with `doneWhen`, `rejected` with `reason`, `deferred` with `trigger`) and any settled principles.
+     3. Update the repository's design authority (`standards.designAuthority`) with settled principles (or make that the first register step).
+     4. **Bridge into `execution-plan-integrity` (`docs/execution-plan.md`)**: Group all `accepted` findings into ordered register rows following `app-slop-audit/references/fixing.md` ordering:
+        - Step 1: Design-authority updates (if not already applied in step 3);
+        - Step 2+: Shared foundations and accepted `shared/` findings (`packages/*`);
+        - Next: Per-app screen/module fix steps (sliced by screen or module, each naming the exact finding IDs `F...` it closes and its target app path);
+        - Final: End-to-end verification / `--complete` gate.
+        Insert these rows into the canonical register (`<!-- execution-register:start/end -->` in `docs/execution-plan.md`) with the first executable row as `NOW` (if no earlier task is currently `NOW`) and the rest as `QUEUED`.
+     5. Run both `node <app-slop-audit>/assets/checker/check-records.mjs <audit>` and `node <execution-plan-integrity>/assets/checker/check-execution-plan.mjs --root <repo>`.
 
 ---
 
