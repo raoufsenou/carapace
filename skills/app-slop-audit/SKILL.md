@@ -1,6 +1,7 @@
 ---
 name: app-slop-audit
 description: Audit a built web app's UI for what was rushed or generated without judgment, or, when asked, what no screen shows, such as its backend, data, and code; keep every finding, verdict, and fix in committed records so repeated audits build on each other instead of changing their mind; and apply accepted fixes in tracked steps that each close with proof. Use when asked to find UI slop or rushed work in an app's screens, to run a non-UI audit of an app's backend, data, or code, to record verdicts on audit findings, to apply or verify audit fixes, to correct or rewrite the latest audit report without a new version, to reconcile what several apps' audits found in the code they share into one shared record and report, or to import an earlier audit report into the records.
+user-invocable: false
 ---
 
 # App Slop Audit

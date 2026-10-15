@@ -16,7 +16,7 @@ export const ARTIFACT_ENTRIES = Object.freeze([
 export const REQUIRED_ARTIFACT_FILES = ARTIFACT_ENTRIES
 
 export const ARTIFACT_SHA256 = Object.freeze({
-  'SKILL.md': '5422a2ba6506ceef1688d552bca8bff062ab4a03d35ace9bde94930e79984c42',
+  'SKILL.md': '845028acb839a298978b59f2f7dade20773c2a33bf8f99f47fc8a5a3244a9728',
   'agents/openai.yaml': 'd9322ee1351bdce6770eb1994f18a8bb485fc97abdd0bc56e356acc44c3c93cb',
   'references/contract.md': 'd07250056d55df8f10997f1ea6feedff4030d5aaa9253eb19ed18088b31ba3d7',
   'references/migration.md': 'c65261aead6a0073e3f025ceea760af68a5772142dd616e29a2fb1ce97168d7a',

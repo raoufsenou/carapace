@@ -1,6 +1,7 @@
 ---
 name: execution-plan-integrity
 description: Audit, consolidate, and enforce a single-source execution plan and requirement-level completion proofs in software repositories with Node available for the checker. Use when plan-state drift, design-only completion, weak DONE evidence, duplicated execution documents, or ambiguous “what is next?” claims make delivery status unreliable; not for choosing product priorities or writing an ordinary one-off plan.
+user-invocable: false
 ---
 
 # Execution Plan Integrity
