@@ -52,8 +52,8 @@ function demo() {
 }
 
 test('commandPlan parses --replace and --target and rejects unknown flags', () => {
-  assert.deepEqual(commandPlan([]), { replace: false, targets: ['claude', 'codex', 'cursor'] })
-  assert.deepEqual(commandPlan(['--replace']), { replace: true, targets: ['claude', 'codex', 'cursor'] })
+  assert.deepEqual(commandPlan([]), { replace: false, targets: ['claude'] })
+  assert.deepEqual(commandPlan(['--replace']), { replace: true, targets: ['claude'] })
   assert.deepEqual(commandPlan(['--target', 'codex,cursor']), { replace: false, targets: ['codex', 'cursor'] })
   assert.deepEqual(commandPlan(['--target', 'claude', '--replace']), { replace: true, targets: ['claude'] })
   assert.deepEqual(commandPlan(['--target', 'all']), { replace: false, targets: ['claude', 'codex', 'cursor'] })
@@ -62,43 +62,44 @@ test('commandPlan parses --replace and --target and rejects unknown flags', () =
   assert.throws(() => commandPlan(['--replace', '--replace']), /Usage: node scripts\/install\.mjs/)
 })
 
-test('first install populates Claude Code, Codex, and Cursor, and a second run reports current', () => {
+test('the default install populates only Claude Code, and a second run reports current', () => {
   const { checkout, claudeHome, codexHome, cursorHome } = demo()
   const first = install({ checkout, claudeHome, codexHome, cursorHome })
-  assert.deepEqual(first.map((r) => [r.target, r.action]), [
-    ['claude', 'installed'],
-    ['codex', 'installed'],
-    ['cursor', 'installed'],
-  ])
+  assert.deepEqual(first.map((r) => [r.target, r.action]), [['claude', 'installed']])
 
   const claudeSettings = JSON.parse(readFileSync(join(claudeHome, 'settings.json'), 'utf8'))
   assert.equal(claudeSettings.enabledPlugins['carapace@carapace'], true)
   assert.equal(claudeSettings.extraKnownMarketplaces.carapace.source.path, checkout)
+  assert.equal(existsSync(codexHome), false)
+  assert.equal(existsSync(cursorHome), false)
 
-  for (const home of [codexHome, cursorHome]) {
-    assert.deepEqual(filesIn(join(home, 'skills', 'carapace')), [
-      'SKILL.md',
-      'agents/openai.yaml',
-      'assets/status.mjs',
-    ])
-    assert.deepEqual(filesIn(join(home, 'agents')), [
-      'carapace-advisor.md',
-      'carapace-heavy.md',
-    ])
-  }
-
-  write(codexHome, 'skills/carapace/.DS_Store', 'system\n')
   const second = install({ checkout, claudeHome, codexHome, cursorHome })
-  assert.deepEqual(second.map((r) => [r.target, r.action]), [
-    ['claude', 'current'],
-    ['codex', 'current'],
-    ['cursor', 'current'],
-  ])
+  assert.deepEqual(second.map((r) => [r.target, r.action]), [['claude', 'current']])
+})
+
+test('a changed Claude cache is refused until --replace refreshes it', () => {
+  const { checkout, claudeHome, codexHome, cursorHome } = demo()
+  install({ checkout, claudeHome, codexHome, cursorHome })
+  write(checkout, 'skills/carapace/SKILL.md', '---\nname: carapace\ndescription: Revised flow.\n---\n\n# Revised Carapace\n')
+
+  assert.throws(
+    () => install({ checkout, claudeHome, codexHome, cursorHome }),
+    /plugins\/cache\/carapace\/carapace\/2\.0\.0 differs from this checkout[\s\S]*Rerun with --replace/,
+  )
+
+  const replaced = install({ checkout, claudeHome, codexHome, cursorHome, replace: true })
+  assert.deepEqual(replaced.map((r) => [r.target, r.action]), [['claude', 'replaced']])
+  assert.equal(
+    readFileSync(join(claudeHome, 'plugins', 'cache', 'carapace', 'carapace', '2.0.0', 'skills', 'carapace', 'SKILL.md'), 'utf8'),
+    '---\nname: carapace\ndescription: Revised flow.\n---\n\n# Revised Carapace\n',
+  )
+  assert.equal(existsSync(codexHome), false)
+  assert.equal(existsSync(cursorHome), false)
 })
 
 test('diverged skill or agent files are refused until --replace replaces them', () => {
   const { checkout, claudeHome, codexHome, cursorHome } = demo()
-  install({ checkout, claudeHome, codexHome, cursorHome })
+  install({ checkout, claudeHome, codexHome, cursorHome, targets: ['cursor'] })
 
   write(cursorHome, 'agents/carapace-heavy.md', 'modified by hand\n')
   assert.throws(
@@ -114,7 +115,7 @@ test('diverged skill or agent files are refused until --replace replaces them', 
   )
 })
 
-test('CLI installs the real repository checkout into isolated CLAUDE_HOME, CODEX_HOME, and CURSOR_HOME', () => {
+test('CLI defaults to Claude Code and installs other harnesses only when targeted', () => {
   const root = temporaryRoot()
   const env = {
     ...process.env,
@@ -127,11 +128,18 @@ test('CLI installs the real repository checkout into isolated CLAUDE_HOME, CODEX
   const first = run()
   assert.equal(first.status, 0, first.stderr)
   assert.match(first.stdout, /\[claude\] Installed carapace@carapace/)
-  assert.match(first.stdout, /\[codex\] Installed carapace /)
-  assert.match(first.stdout, /\[codex\] Installed execution-plan-integrity /)
-  assert.match(first.stdout, /\[codex\] Installed app-slop-audit /)
-  assert.match(first.stdout, /\[cursor\] Installed carapace /)
-  assert.match(first.stdout, /\[cursor\] Installed carapace-advisor /)
+  assert.doesNotMatch(first.stdout, /\[(?:codex|cursor)\]/)
+  assert.equal(existsSync(env.CODEX_HOME), false)
+  assert.equal(existsSync(env.CURSOR_HOME), false)
+
+  const optedIn = run('--target', 'codex,cursor')
+  assert.equal(optedIn.status, 0, optedIn.stderr)
+  assert.doesNotMatch(optedIn.stdout, /\[claude\]/)
+  assert.match(optedIn.stdout, /\[codex\] Installed carapace /)
+  assert.match(optedIn.stdout, /\[codex\] Installed execution-plan-integrity /)
+  assert.match(optedIn.stdout, /\[codex\] Installed app-slop-audit /)
+  assert.match(optedIn.stdout, /\[cursor\] Installed carapace /)
+  assert.match(optedIn.stdout, /\[cursor\] Installed carapace-advisor /)
 
   for (const home of [env.CODEX_HOME, env.CURSOR_HOME]) {
     assert.deepEqual(readdirSync(join(home, 'skills')).sort(), [
@@ -150,7 +158,7 @@ test('CLI installs the real repository checkout into isolated CLAUDE_HOME, CODEX
     assert.equal(existsSync(join(home, 'skills', 'carapace', 'assets', 'status.mjs')), true)
   }
 
-  const second = run()
+  const second = run('--target', 'all')
   assert.equal(second.status, 0, second.stderr)
   assert.match(second.stdout, /\[claude\] carapace@carapace .* already matches this checkout/)
   assert.match(second.stdout, /\[codex\] carapace .* already matches this checkout/)

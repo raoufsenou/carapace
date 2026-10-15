@@ -2,16 +2,18 @@
 
 A single self-contained Claude Code plugin bundling `carapace` orchestration, `execution-plan-integrity`, `app-slop-audit`, six `carapace-*` subagents, the live `AbovePrompt` progress bar, the Agents side panel, and automatic next-step prompt suggestions.
 
-## Install across Claude Code, Codex, and Cursor
+## Install for Claude Code, Codex, and Cursor
 
-From a local checkout, install (or update with `--replace`) into all three harnesses (`~/.claude`, `~/.codex`, and `~/.cursor`):
+From a local checkout, the default command installs only into Claude Code (`~/.claude`). Codex and Cursor are not touched unless named with `--target`:
 
 ```bash
 node scripts/install.mjs
-# Replace existing installs that differ from this checkout:
+# Replace an existing Claude install that differs from this checkout:
 node scripts/install.mjs --replace
-# Or target specific harnesses:
-node scripts/install.mjs --target claude,codex,cursor
+# Install only into specific other harnesses:
+node scripts/install.mjs --target codex,cursor
+# Or install into all three:
+node scripts/install.mjs --target all
 ```
 
 Or install only the Claude Code plugin directly via `claude`:

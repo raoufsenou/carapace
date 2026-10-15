@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// Installs the carapace plugin across Claude Code (~/.claude), Codex (~/.codex), and Cursor (~/.cursor).
+// Installs the carapace plugin into Claude Code (~/.claude) by default, with Codex and Cursor opt-in.
 // Existing installs that differ from this checkout are refused unless --replace is passed.
 // Tests: node --test scripts/install.test.mjs
 
@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url'
 const CHECKOUT = fileURLToPath(new URL('..', import.meta.url))
 const SKILL_PARTS = ['SKILL.md', 'agents', 'assets', 'references']
 const TARGET_NAMES = ['claude', 'codex', 'cursor']
+const DEFAULT_TARGET_NAMES = ['claude']
 const USAGE = 'Usage: node scripts/install.mjs [--replace] [--target all|claude|codex|cursor]'
 
 export function commandPlan(args) {
@@ -53,7 +54,7 @@ export function commandPlan(args) {
   }
   return {
     replace,
-    targets: selected.length > 0 ? selected : [...TARGET_NAMES],
+    targets: selected.length > 0 ? selected : [...DEFAULT_TARGET_NAMES],
   }
 }
 
@@ -67,12 +68,12 @@ function frontmatterName(path, kind) {
   return name
 }
 
-function collect(root, path, files = new Map()) {
+function collect(root, path, files = new Map(), { includeHidden = false } = {}) {
   const stats = lstatSync(path, { throwIfNoEntry: false })
   if (!stats) return files
   if (stats.isDirectory()) {
     for (const name of readdirSync(path)) {
-      if (!name.startsWith('.')) collect(root, join(path, name), files)
+      if (includeHidden || !name.startsWith('.')) collect(root, join(path, name), files, { includeHidden })
     }
   } else if (stats.isFile()) {
     files.set(relative(root, path).split(sep).join('/'), readFileSync(path))
@@ -82,8 +83,8 @@ function collect(root, path, files = new Map()) {
   return files
 }
 
-function differences(files, destination) {
-  const installed = collect(destination, destination)
+function differences(files, destination, options) {
+  const installed = collect(destination, destination, new Map(), options)
   return [...new Set([...files.keys(), ...installed.keys()])].sort().flatMap((path) => {
     if (!installed.has(path)) return [`${path} (added)`]
     if (!files.has(path)) return [`${path} (removed)`]
@@ -302,6 +303,15 @@ function installClaudeHome({ checkout, claudeHome, replace }) {
     )
   }
 
+  const pluginFiles = new Map()
+  for (const entry of ['.claude-plugin', 'agents', 'hooks', 'skills', 'types', 'package.json', 'tsconfig.json', 'README.md']) {
+    collect(resolvedCheckout, join(resolvedCheckout, entry), pluginFiles)
+  }
+  const cacheChanges = differences(pluginFiles, cacheDir, { includeHidden: true })
+  if (existsSync(cacheDir) && cacheChanges.length > 0 && !replace) {
+    throw new Error(`${cacheDir} differs from this checkout:\n${listed(cacheChanges)}\nRerun with --replace to replace it.`)
+  }
+
   const installedEntry = Array.isArray(installedPlugins?.plugins?.[pluginId])
     ? installedPlugins.plugins[pluginId][0]
     : null
@@ -312,7 +322,7 @@ function installClaudeHome({ checkout, claudeHome, replace }) {
     settings?.enabledPlugins?.[pluginId] === true &&
     settings?.extraKnownMarketplaces?.[pluginName]?.source?.path === resolvedCheckout &&
     installedEntry?.version === version &&
-    existsSync(cacheDir)
+    cacheChanges.length === 0
 
   if (alreadyCurrent) {
     return {
@@ -369,10 +379,6 @@ function installClaudeHome({ checkout, claudeHome, replace }) {
   }
 
   // Mirror the plugin files into cacheDir so Claude Code has both the directory marketplace and cache snapshot.
-  const pluginFiles = new Map()
-  for (const entry of ['.claude-plugin', 'agents', 'hooks', 'skills', 'types', 'package.json', 'tsconfig.json', 'README.md']) {
-    collect(resolvedCheckout, join(resolvedCheckout, entry), pluginFiles)
-  }
   mkdirSync(dirname(cacheDir), { recursive: true })
   const tempCache = mkdtempSync(join(dirname(cacheDir), `.${pluginName}-cache-`))
   try {
@@ -420,7 +426,7 @@ export function install({
   codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'),
   cursorHome = process.env.CURSOR_HOME || join(homedir(), '.cursor'),
   replace = false,
-  targets = TARGET_NAMES,
+  targets = DEFAULT_TARGET_NAMES,
 } = {}) {
   const skills = collectCheckoutSkills(checkout)
   const agents = collectCheckoutAgents(checkout)
