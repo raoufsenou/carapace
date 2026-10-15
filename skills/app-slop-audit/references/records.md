@@ -218,7 +218,9 @@ Ruling again on one an earlier round decided, unless its trigger has fired, chan
 decision says why in `reverses`. A proposal answered `kept` leaves its decision as it was, so no decision in
 that round changes it, and no later run proposes it again on the same evidence. One answered `reopened` takes
 effect in the same round: a finding gets its new decision, a principle is changed or retired, and an
-out-of-scope item leaves the config. A round answers its version's proposals before the next audit.
+out-of-scope item leaves the config. A round answers its version's proposals before the next audit. A later round
+may follow the version's fix steps, deciding what an earlier round left open, and only the steps after it work on
+what it accepts.
 
 A principle states the rule, not its history: what must stay true, and the findings it comes from, each
 accepted, done, or regressed. A new principle takes the next number, above every earlier one. A later round
@@ -253,7 +255,7 @@ with `retired` alone, why it no longer holds. An ID is never reused.
 
 | Key | Holds |
 | --- | --- |
-| `version` | The audit whose verdicts it acts on. It comes after that version's rounds and before the next audit, and is dated between them. |
+| `version` | The audit whose verdicts it acts on. It comes after that version's first round and before the next audit, and is dated between them; a later round on the same version may fall between its steps. |
 | `date` | When the step finished. |
 | `findings` | One entry for each finding it closed or worked on, each accepted or regressed when it began. |
 
@@ -295,8 +297,9 @@ proof of a done finding, and each proof an accepted one has so far.
 
 ## How status is worked out
 
-The checker reads the files in order: for each version, its audit, then its rounds of verdicts, then its fix
-steps by date, and those of one day by name. A finding's status is where that leaves it.
+The checker reads the files in order: for each version, its audit, then its first round of verdicts, then its fix
+steps and any later rounds by date, a round before the steps of its own day and the steps of one day by name. A
+finding's status is where that leaves it.
 
 | Status | Comes from | Later versions |
 | --- | --- | --- |

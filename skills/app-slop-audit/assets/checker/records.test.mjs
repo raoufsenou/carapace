@@ -594,6 +594,31 @@ test('a proposal must be answered before the next version', () => {
   assertRefused(records, 'v3.json proposes reopening B3, and no round answered it before v4')
 })
 
+test('a later round may follow the steps to decide what the first left open, and only a step after it works on what it accepts', () => {
+  const records = variant((r) => {
+    r['v1-verdicts.json'].decisions = r['v1-verdicts.json'].decisions.filter((entry) => entry.finding !== 'B1')
+    r['v1-verdicts-2.json'] = {
+      date: '2026-10-10',
+      by: 'the maintainer',
+      decisions: [{ finding: 'B1', verdict: 'accepted', doneWhen: 'every state is a chip' }],
+    }
+    r['fixes/RAIL.json'] = {
+      version: 1,
+      date: '2026-10-11',
+      findings: [{ id: 'B1', proofs: [{ kind: 'test', file: 'tests/rail.spec.ts', title: 'every state is a chip' }] }],
+    }
+    r['v2.json'].rechecked[1] = { finding: 'B1', outcome: 'holds', observed: 'every state is a chip' }
+  })
+  const { records: read, errors } = checkRecords(filesOf(records))
+  assert.deepEqual(errors, [])
+  assert.equal(read.findings.get('B1').status, 'done')
+  const sameDay = structuredClone(records)
+  sameDay['v1-verdicts-2.json'].date = '2026-10-11'
+  assert.deepEqual(errorsOf(sameDay), [])
+  records['fixes/RAIL.json'].date = '2026-10-09'
+  assertRefused(records, 'fixes/RAIL.json works on B1, which is open when the step begins')
+})
+
 function fakeLook(today, then) {
   const at = (commit) => (commit === null ? today : then)
   return {

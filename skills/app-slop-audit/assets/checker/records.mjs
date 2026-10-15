@@ -265,6 +265,19 @@ function roundsOf(rounds, version, errors) {
   return ordered
 }
 
+// A version's first round is read before the steps that follow its audit, and each later round among them by its date,
+// before the steps of its own day, so a later round can decide what the first left open while steps fix what it accepted.
+function inReadingOrder(rounds, fixes) {
+  const [first, ...later] = rounds
+  const ordered = first ? [{ round: first }] : []
+  let next = 0
+  for (const fix of fixes) {
+    while (next < later.length && compare(later[next].data.date, fix.data.date) <= 0) ordered.push({ round: later[next++] })
+    ordered.push({ fix })
+  }
+  return [...ordered, ...later.slice(next).map((round) => ({ round }))]
+}
+
 function dated(records, name, date, errors) {
   const last = records.lastDated
   if (last && date < last.date) errors.push(`${name} is dated ${date}, before ${last.name} (${last.date}), which it follows; dates never go back`)
@@ -842,8 +855,11 @@ export function checkRecords(files, { complete = false, audit = 'ui', shared = f
       break
     }
     const version = readAudit(records, number, read.audits.get(number), errors)
-    for (const round of roundsOf(read.rounds.get(number), version, errors)) readRound(records, version, round, errors)
-    for (const fix of fixes.filter((each) => each.data.version === number)) readFix(records, version, fix, errors)
+    const rounds = roundsOf(read.rounds.get(number), version, errors)
+    for (const { round, fix } of inReadingOrder(rounds, fixes.filter((each) => each.data.version === number))) {
+      if (round) readRound(records, version, round, errors)
+      else readFix(records, version, fix, errors)
+    }
   }
   if (latest === 0 && records.config) errors.push('the records hold no version; the first audit writes v1.json')
   finish(records, errors, complete)
