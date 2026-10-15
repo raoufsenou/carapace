@@ -353,15 +353,50 @@ const stripTicks = (s: string): string => {
   return t.startsWith('`') && t.endsWith('`') && t.length >= 2 ? t.slice(1, -1).trim() : t
 }
 
-const shortWork = (work: string): string => {
-  const clean = work.replace(/`/g, '').replace(/\s+/g, ' ').trim()
-  const clause = clean.split(/[.;—]/)[0]?.trim() || clean
-  return clip(clause, 72)
+const stripFormatting = (s: string): string =>
+  s.trim().replace(/^(?:`|\*)+|(?:`|\*)+$/g, '').trim()
+
+const findUnmigratedQueueNow = (md: string, start: number, end: number): string | null => {
+  const outside = `${md.slice(0, start)}\n${md.slice(end + REGISTER_END.length)}`
+  let idCol = -1
+  let stateCol = -1
+  let lastNowId: string | null = null
+
+  for (const raw of outside.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line.startsWith('|') || !line.endsWith('|')) {
+      idCol = -1
+      stateCol = -1
+      continue
+    }
+    const cells = line.slice(1, -1).split('|').map(c => c.trim())
+    if (cells.every(c => /^:?-{3,}:?$/.test(c))) continue
+    const headerState = cells.findIndex(c => /^state$/i.test(stripFormatting(c)))
+    const headerId = cells.findIndex(c => /^(?:id|step|task)$/i.test(stripFormatting(c)))
+    if (headerState !== -1 && headerId !== -1) {
+      idCol = headerId
+      stateCol = headerState
+      continue
+    }
+    if (idCol !== -1 && stateCol !== -1 && stateCol < cells.length && idCol < cells.length) {
+      if (stripFormatting(cells[stateCol] ?? '') === 'NOW') {
+        const candidate = stripFormatting(cells[idCol] ?? '')
+        if (candidate) lastNowId = candidate
+      }
+    }
+  }
+  return lastNowId
+}
+
+type RegisterSync = {
+  finished: boolean
+  nextPrompt: string
 }
 
 // Reads the bounded `<!-- execution-register:start/end -->` block from an
-// execution-plan-integrity canonical document as a live view for the band and panel.
-const parseRegister = (md: string): ProgressInput | null => {
+// execution-plan-integrity canonical document to suggest the next /carapace command
+// without hijacking the live AbovePrompt flow bar with static plan rows.
+const parseRegister = (md: string): RegisterSync | null => {
   const start = md.indexOf(REGISTER_START)
   const end = md.indexOf(REGISTER_END)
   if (start === -1 || end === -1 || end <= start) return null
@@ -388,45 +423,29 @@ const parseRegister = (md: string): ProgressInput | null => {
 
   const total = rows.length
   const done = rows.filter(r => r.state === 'DONE').length
+  const unmigratedNow = findUnmigratedQueueNow(md, start, end)
+  if (unmigratedNow) {
+    return {
+      finished: false,
+      nextPrompt: '/carapace setup',
+    }
+  }
   if (nowId === 'NONE') {
     return {
-      title: 'Execution plan',
-      total,
-      done,
-      phase: 'close',
       finished: total > 0 && done === total,
-      nextPrompt: '/carapace audit',
-      tasks: [],
+      nextPrompt: '/carapace',
     }
   }
   if (nowId === 'IDLE') {
     return {
-      title: 'Execution plan (IDLE)',
-      total,
-      done,
-      phase: 'plan',
       finished: false,
       nextPrompt: '/carapace',
-      tasks: [],
     }
   }
 
-  const nowRow = rows.find(r => r.id === nowId)
-  const isBatch = nowRow ? /^Batch:\s+/i.test(nowRow.work) : false
-  const pending = rows.filter(r => (r.state === 'NOW' && !isBatch) || r.state === 'QUEUED')
-  const tasks = pending.slice(0, MAX_TASKS).map(r => ({
-    title: `${r.id}: ${shortWork(r.work)}`,
-    tier: r.kind === 'VALIDATION' || r.kind === 'DOCUMENTATION' ? 'light' : 'careful',
-  }))
-
   return {
-    title: isBatch ? `Batch ${nowId}` : `NOW ${nowId}`,
-    total,
-    done,
-    phase: 'delegate',
     finished: false,
-    nextPrompt: `/carapace Execute ${nowId}`,
-    tasks,
+    nextPrompt: `/carapace run ${nowId}`,
   }
 }
 
@@ -843,32 +862,49 @@ async function suggestNext($: EngineInterface, text: string | undefined): Promis
   await $.prompt.suggest({ text }).catch(() => null)
 }
 
-async function syncRegister($: EngineInterface): Promise<void> {
+async function syncRegister($: EngineInterface, editedFile?: string): Promise<void> {
   try {
     const rawCfg = await $.fs.read(REGISTER_CONFIG)
     const cfg = JSON.parse(rawCfg) as { canonical?: unknown }
     if (typeof cfg.canonical !== 'string' || !cfg.canonical.trim()) return
-    const md = await $.fs.read(cfg.canonical.trim())
+    const canonicalPath = cfg.canonical.trim()
+    const md = await $.fs.read(canonicalPath)
     const parsed = parseRegister(md)
     if (!parsed) return
+    await update($, panel, prev => ({ ...prev, registerPrompt: parsed.nextPrompt }))
+    const editedCanonical =
+      typeof editedFile === 'string' &&
+      editedFile.length > 0 &&
+      (editedFile.endsWith(canonicalPath) || editedFile.endsWith(REGISTER_CONFIG))
     const current = await read($, flow)
-    if (current && !current.isFinished && !current.isFromRegister) {
+    if (current && !current.isFinished) {
       if (parsed.finished) {
-        await update($, flow, prev =>
-          prev ? { ...prev, done: prev.total, phase: 'close', isFinished: true, nextPrompt: parsed.nextPrompt ?? prev.nextPrompt } : prev,
+        const next = await update($, flow, prev =>
+          prev
+            ? {
+                ...prev,
+                done: prev.total,
+                phase: 'close',
+                isFinished: true,
+                nextPrompt: prev.nextPrompt || parsed.nextPrompt,
+              }
+            : prev,
         )
-        await suggestNext($, parsed.nextPrompt)
-      } else if (parsed.nextPrompt) {
+        await suggestNext($, next?.nextPrompt ?? parsed.nextPrompt)
+      } else if (editedCanonical || !current.nextPrompt) {
         await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
         await suggestNext($, parsed.nextPrompt)
       }
       return
     }
-    const next = await update($, flow, prev => {
-      const merged = merge(prev, parsed)
-      return { ...merged, running: prev ? prev.running : 0, isFromRegister: true }
-    })
-    await suggestNext($, next?.nextPrompt)
+    if (current && current.isFinished) {
+      if (editedCanonical || !current.nextPrompt) {
+        await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
+        await suggestNext($, parsed.nextPrompt)
+      }
+      return
+    }
+    await suggestNext($, parsed.nextPrompt)
   } catch {
     // No .execution-plan-integrity.json or canonical register in this repo.
   }
@@ -895,7 +931,7 @@ export const register: Register = (on, options) => {
           finished: { type: 'boolean', description: 'True once the flow is closed.' },
           nextPrompt: {
             type: 'string',
-            description: 'Recommended next /carapace command to suggest in the prompt box and panel (e.g. "/carapace Execute UI-APPLY-25-WEB" or "/carapace audit ui").',
+            description: 'Recommended next /carapace command to suggest in the prompt box and panel (e.g. "/carapace run UI-APPLY-25-WEB" or "/carapace decide ui").',
           },
           tasks: {
             type: 'array',
@@ -947,8 +983,10 @@ export const register: Register = (on, options) => {
 
   on('prompt.suggest', async ($, e, next) => {
     const f = await read($, flow)
-    if (f?.nextPrompt && e.origin.kind !== 'plugin') {
-      return next({ ...e, text: f.nextPrompt })
+    const p = await read($, panel)
+    const nextCmd = f?.nextPrompt ?? p.registerPrompt
+    if (nextCmd && e.origin.kind !== 'plugin') {
+      return next({ ...e, text: nextCmd })
     }
     return next(e)
   })
@@ -964,18 +1002,19 @@ export const register: Register = (on, options) => {
       await update($, agents, list => list.filter(a => a.status === 'running'))
     }
     const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
-    if (next && input.tasks?.length) await autoOpen($, next.title)
+    if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
     if (next?.nextPrompt && (input.nextPrompt !== undefined || next.isFinished)) {
       await suggestNext($, next.nextPrompt)
     }
     return { result: `ok: ${label(next ?? blank())}` }
   })
 
-  // Refresh the canonical execution-register view when the main session edits files or runs commands.
+  // Refresh the canonical execution-register suggestion when the main session edits files or runs commands.
   for (const tool of ['Write', 'Edit', 'MultiEdit', 'Bash'] as const) {
     on('tool.call', { tool }, async ($, e, next) => {
       const res = await next(e)
-      if (!e.agentId) await syncRegister($)
+      const filePath = typeof (e as { file_path?: unknown }).file_path === 'string' ? String((e as { file_path?: unknown }).file_path) : undefined
+      if (!e.agentId) await syncRegister($, filePath)
       return res
     })
   }
@@ -1023,6 +1062,7 @@ export const register: Register = (on, options) => {
     if (started.deny !== undefined) return started
 
     const at = await $.clock.now()
+    let workerCount = 0
     await update($, agents, list => {
       const round = 1 + list.filter(a => norm(a.description) === norm(e.description) && e.description).length
       const run: AgentRun = {
@@ -1040,11 +1080,14 @@ export const register: Register = (on, options) => {
         steps: 0,
         round,
       }
-      return [...list.filter(a => a.id !== run.id), run].slice(-200)
+      const updated = [...list.filter(a => a.id !== run.id), run].slice(-200)
+      workerCount = updated.filter(a => !isScout(a.type)).length
+      return updated
     })
     await update($, now, () => at)
-    if (isCarapace(e.subagentType) || isFlowActive) {
-      const f = await read($, flow)
+    const f = await read($, flow)
+    const plannedCount = f && !f.isFinished ? f.tasks.length : 0
+    if ((isCarapace(e.subagentType) || isFlowActive) && (workerCount > 1 || plannedCount > 1)) {
       await autoOpen($, f && !f.isFinished ? f.title : 'carapace')
     } else if (options.autoOpen === 'any') {
       await autoOpen($, 'any-agent')
@@ -1156,7 +1199,7 @@ export const register: Register = (on, options) => {
     )
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
-    const nextCmd = f?.nextPrompt
+    const nextCmd = f?.nextPrompt ?? p.registerPrompt
     const nextButton = nextCmd ? (
       <Button
         key="carapace-next"

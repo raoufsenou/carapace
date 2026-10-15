@@ -51,7 +51,7 @@ test('parseRegisterStatus computes progress bar and deterministic nextPrompt for
   assert.equal(active.pct, 50)
   assert.equal(active.bar, '████████░░░░░░░░')
   assert.equal(active.label, 'P1.2')
-  assert.equal(active.nextPrompt, '/carapace Execute P1.2')
+  assert.equal(active.nextPrompt, '/carapace run P1.2')
 
   const batch = parseRegisterStatus([
     '<!-- execution-register:start -->',
@@ -65,7 +65,7 @@ test('parseRegisterStatus computes progress bar and deterministic nextPrompt for
   ].join('\n'))
   assert.equal(batch.isBatch, true)
   assert.equal(batch.label, 'Batch BATCH-1')
-  assert.equal(batch.nextPrompt, '/carapace Execute BATCH-1')
+  assert.equal(batch.nextPrompt, '/carapace run BATCH-1')
 
   const idle = parseRegisterStatus([
     '<!-- execution-register:start -->',
@@ -88,7 +88,25 @@ test('parseRegisterStatus computes progress bar and deterministic nextPrompt for
   ].join('\n'))
   assert.equal(none.label, 'NONE')
   assert.equal(none.pct, 100)
-  assert.equal(none.nextPrompt, '/carapace audit')
+  assert.equal(none.nextPrompt, '/carapace')
+
+  const unmigrated = parseRegisterStatus([
+    '## Substeps',
+    '| ID | State | Work |',
+    '| --- | --- | --- |',
+    '| `APP-AUDIT-FRAME` | **NOW** | Shared frame. |',
+    '',
+    '<!-- execution-register:start -->',
+    '`NOW`: `BROWSER-WEB-APP`',
+    '',
+    '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| 1 | `BROWSER-WEB-APP` | `IMPLEMENTATION` | `NOW` | Parent task. | Plan |',
+    '<!-- execution-register:end -->',
+  ].join('\n'))
+  assert.equal(unmigrated.unmigratedNow, 'APP-AUDIT-FRAME')
+  assert.equal(unmigrated.label, 'BROWSER-WEB-APP (unmigrated queue: APP-AUDIT-FRAME)')
+  assert.equal(unmigrated.nextPrompt, '/carapace setup')
 })
 
 test('readCarapaceStatus and CLI output work for uninitialized and initialized repositories', () => {
@@ -126,6 +144,6 @@ test('readCarapaceStatus and CLI output work for uninitialized and initialized r
   assert.equal(run.status, 0, run.stderr)
   assert.equal(
     run.stdout,
-    'Carapace: [████████░░░░░░░░] 1/2 (50%) · NOW: P2.1\nNext → /carapace Execute P2.1\n',
+    'Carapace: [████████░░░░░░░░] 1/2 (50%) · NOW: P2.1\nNext → /carapace run P2.1\n',
   )
 })

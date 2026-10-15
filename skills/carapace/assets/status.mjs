@@ -48,6 +48,42 @@ export function renderBar(done, total, cells = BAR_CELLS) {
   return '█'.repeat(filled) + '░'.repeat(Math.max(0, cells - filled))
 }
 
+function stripFormatting(value) {
+  return (value ?? '').trim().replace(/^(?:`|\*)+|(?:`|\*)+$/g, '').trim()
+}
+
+function findUnmigratedQueueNow(markdown, start, end) {
+  const outside = `${markdown.slice(0, start)}\n${markdown.slice(end + REGISTER_END.length)}`
+  let idCol = -1
+  let stateCol = -1
+  let lastNowId = null
+
+  for (const raw of outside.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line.startsWith('|') || !line.endsWith('|')) {
+      idCol = -1
+      stateCol = -1
+      continue
+    }
+    const cells = line.slice(1, -1).split('|').map((cell) => cell.trim())
+    if (cells.every((cell) => /^:?-{3,}:?$/.test(cell))) continue
+    const headerState = cells.findIndex((cell) => /^state$/i.test(stripFormatting(cell)))
+    const headerId = cells.findIndex((cell) => /^(?:id|step|task)$/i.test(stripFormatting(cell)))
+    if (headerState !== -1 && headerId !== -1) {
+      idCol = headerId
+      stateCol = headerState
+      continue
+    }
+    if (idCol !== -1 && stateCol !== -1 && stateCol < cells.length && idCol < cells.length) {
+      if (stripFormatting(cells[stateCol]) === 'NOW') {
+        const candidate = stripFormatting(cells[idCol])
+        if (candidate) lastNowId = candidate
+      }
+    }
+  }
+  return lastNowId
+}
+
 export function parseRegisterStatus(markdown) {
   const start = markdown.indexOf(REGISTER_START)
   const end = markdown.indexOf(REGISTER_END)
@@ -78,13 +114,13 @@ export function parseRegisterStatus(markdown) {
   const pct = total > 0 ? Math.round((done / total) * 100) : 0
   const nowRow = rows.find((row) => row.id === now)
   const isBatch = nowRow ? /^Batch:\s+/i.test(nowRow.work) : false
-  const nextPrompt =
-    now === 'NONE'
-      ? '/carapace audit'
-      : now === 'IDLE'
-        ? '/carapace'
-        : `/carapace Execute ${now}`
-  const label =
+  const unmigratedNow = findUnmigratedQueueNow(markdown, start, end)
+  const nextPrompt = unmigratedNow
+    ? '/carapace setup'
+    : now === 'NONE' || now === 'IDLE'
+      ? '/carapace'
+      : `/carapace run ${now}`
+  const baseLabel =
     now === 'NONE'
       ? 'NONE'
       : now === 'IDLE'
@@ -92,11 +128,13 @@ export function parseRegisterStatus(markdown) {
         : isBatch
           ? `Batch ${now}`
           : now
+  const label = unmigratedNow ? `${baseLabel} (unmigrated queue: ${unmigratedNow})` : baseLabel
 
   return {
     now,
     label,
     isBatch,
+    unmigratedNow,
     done,
     total,
     pct,

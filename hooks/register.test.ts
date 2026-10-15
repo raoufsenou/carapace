@@ -73,7 +73,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(started).toMatchObject({ result: 'ok: Tasks 0/3' })
   })
 
-  test(`${surface}: syncs automatically with .execution-plan-integrity.json canonical register (single NOW and Batch)`, async ($, on) => {
+  test(`${surface}: syncs nextPrompt with .execution-plan-integrity.json without populating AbovePrompt from static plan rows`, async ($, on) => {
     let canonicalMd = `<!-- execution-role: canonical -->
 <!-- execution-register:start -->
 \`NOW\`: \`UI-APPLY-24-VERIFIER\`
@@ -100,16 +100,22 @@ for (const surface of ['terminal', 'desktop'] as const) {
       throw new Error(`ENOENT: ${e.path}`)
     })
     on('tool.call', { tool: 'Edit' }, async () => ({ result: 'edited' }) as never)
+    on('tool.call', { tool: 'Bash' }, async () => ({ result: 'committed' }) as never)
+    on('ui.render', { component: 'AbovePrompt' }, (_$, e) => {
+      const { Box } = _$.ui.resolve(e)
+      return Box({})
+    })
 
     await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
 
+    // Static plan rows must not show an AbovePrompt bar before /carapace starts a flow.
     const bar1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
-    // 2 pending tasks (UI-APPLY-24-VERIFIER + UI-APPLY-25-WEB) appear in the crew count.
-    expect((await bar1.find({ key: 'carapace-agents' }))?.props.label).toBe('×2')
-    expect(suggested.at(-1)).toBe('/carapace Execute UI-APPLY-24-VERIFIER')
+    expect(await bar1.find({ key: 'carapace-agents' })).toBeUndefined()
+    expect(suggested.at(-1)).toBe('/carapace run UI-APPLY-24-VERIFIER')
 
     const panel1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
-    expect((await panel1.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace Execute UI-APPLY-24-VERIFIER')
+    expect((await panel1.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run UI-APPLY-24-VERIFIER')
+    expect(await panel1.find({ text: /Planned/ })).toBeUndefined()
     await panel1.unmount()
 
     // Transition step 24 to DONE and form a Batch over step 25.
@@ -126,18 +132,27 @@ for (const surface of ['terminal', 'desktop'] as const) {
 <!-- execution-register:end -->`
 
     await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
-
-    const bar2 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
-    expect((await bar2.find({ key: 'carapace-agents' }))?.props.label).toBe('×1')
-    expect(suggested.at(-1)).toBe('/carapace Execute UI-APPLY-BATCH-1')
+    expect(suggested.at(-1)).toBe('/carapace run UI-APPLY-BATCH-1')
 
     const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
-    expect(await panelUi.find({ text: /Planned · 1/ })).toBeDefined()
-    expect((await panelUi.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace Execute UI-APPLY-BATCH-1')
+    expect((await panelUi.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run UI-APPLY-BATCH-1')
     await panelUi.unmount()
 
-    // Even if a manual progress flow is active, reaching NOW: NONE in the canonical register finishes the bar and suggests /carapace audit.
-    await $.tool.call({ tool: PROGRESS, title: 'Execute UI-APPLY-BATCH-1', phase: 'review', total: 2, done: 1 } as never)
+    // When a flow finishes with an explicit nextPrompt, running Bash (e.g. git commit) preserves it.
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Run UI-APPLY-24-VERIFIER',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace run APP-AUDIT-FRAME',
+    } as never)
+    await $.tool.call({ tool: 'Bash', command: 'git commit -m "chore: checkpoint"' } as never)
+    expect(suggested.at(-1)).toBe('/carapace run APP-AUDIT-FRAME')
+
+    // Reaching NOW: NONE during an active flow finishes the bar and suggests /carapace.
+    await $.tool.call({ tool: PROGRESS, title: 'Run UI-APPLY-BATCH-1', phase: 'review', total: 2, done: 1 } as never)
     canonicalMd = `<!-- execution-role: canonical -->
 <!-- execution-register:start -->
 \`NOW\`: \`NONE\`
@@ -148,9 +163,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
 | 2 | \`UI-APPLY-BATCH-1\` | \`VALIDATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-BATCH-1.json. | Audit v1 |
 <!-- execution-register:end -->`
     await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
-    expect(suggested.at(-1)).toBe('/carapace audit')
+    expect(suggested.at(-1)).toBe('/carapace')
     const panelDone = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
-    expect((await panelDone.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace audit')
+    expect((await panelDone.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace')
     const bar3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     if (surface === 'terminal') {
       expect(await bar3.find({ text: /Done/ })).toBeDefined()
@@ -159,6 +174,40 @@ for (const surface of ['terminal', 'desktop'] as const) {
       expect(String(svg?.props.source)).toContain('Done')
       expect(String(svg?.props.source)).toContain('100%')
     }
+  })
+
+  test(`${surface}: a single subagent does not auto-open the Agents panel, while a multi-worker run does`, async ($, on) => {
+    mock.clock(on)
+    const opened: string[] = []
+    on('ui.open', (_$, e) => {
+      opened.push(e.id)
+      return { value: { isPlaced: true } }
+    })
+    on('agent.spawn', async (_$, e) => ({ agentId: `id-${e.tool_use_id}`, model: 'claude-sonnet-5-5' }) as never)
+
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Single step',
+      phase: 'delegate',
+      total: 1,
+      done: 0,
+      tasks: [{ title: 'Apply step 1', tier: 'careful' }],
+    } as never)
+    await $.agent.spawn({
+      tool_use_id: 'single-1',
+      subagentType: 'carapace-careful',
+      description: 'Apply step 1',
+      prompt: 'Do step 1.',
+    } as never)
+    expect(opened).toEqual([])
+
+    await $.agent.spawn({
+      tool_use_id: 'second-2',
+      subagentType: 'carapace-careful',
+      description: 'Apply step 2',
+      prompt: 'Do step 2.',
+    } as never)
+    expect(opened).toEqual(['carapace-agents'])
   })
 
   test(`${surface}: carapace-advisor is treated as a read-only scout without worker STEP_BRIEF injection`, async ($, on) => {

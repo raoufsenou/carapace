@@ -46,6 +46,7 @@ export type Panel = {
   isCompact: boolean
   isDoneCollapsed: boolean
   autoOpenedFor: string
+  registerPrompt?: string
 }
 
 declare module 'claude-code' {
