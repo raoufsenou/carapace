@@ -13,10 +13,59 @@ export const TASK_KINDS = new Set([
   'DOCUMENTATION',
 ])
 const STATES = new Set(['DONE', 'NOW', 'QUEUED', 'OPEN', 'DEFERRED'])
+const LIVE_STATES = new Set(['NOW', 'QUEUED', 'OPEN', 'DEFERRED'])
 const REGISTER_METADATA = /^(?:`NOW`: `(?:NONE|IDLE|[A-Z][A-Z0-9-]+)`\s*|`(?:IDLE REASON|RESUME WHEN)`:.*)$/
 
 function codeValue(cell) {
   return /^`([^`]+)`$/.exec(cell)?.[1] ?? null
+}
+
+function plainToken(cell) {
+  return (cell ?? '').trim().replace(/^(?:`|\*)+|(?:`|\*)+$/g, '').trim()
+}
+
+export function formatLineRanges(lineNumbers) {
+  const ranges = []
+  for (const lineNumber of lineNumbers) {
+    const previous = ranges.at(-1)
+    if (previous && lineNumber === previous[1] + 1) previous[1] = lineNumber
+    else ranges.push([lineNumber, lineNumber])
+  }
+  return ranges.map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`)).join(', ')
+}
+
+export function findTaskTableLinesOutsideRegister(text) {
+  const start = text.indexOf(REGISTER_START)
+  const end = text.indexOf(REGISTER_END)
+  const registerStartLine = start !== -1 ? text.slice(0, start).split('\n').length : -1
+  const registerEndLine = end !== -1 && end > start ? text.slice(0, end + REGISTER_END.length).split('\n').length : -1
+  const lines = text.split('\n')
+  const liveLines = []
+  let stateColumn = -1
+
+  for (const [index, line] of lines.entries()) {
+    const lineNumber = index + 1
+    if (registerStartLine !== -1 && lineNumber >= registerStartLine && lineNumber <= registerEndLine) {
+      stateColumn = -1
+      continue
+    }
+    const row = cells(line.trim())
+    if (row.length === 0) {
+      stateColumn = -1
+      continue
+    }
+    if (isDivider(row)) continue
+    const headerStateIndex = row.findIndex((cell) => /^state$/i.test(plainToken(cell)))
+    if (headerStateIndex !== -1 && row.some((cell) => /^(?:id|step|task)$/i.test(plainToken(cell)))) {
+      stateColumn = headerStateIndex
+      continue
+    }
+    if (stateColumn !== -1 && stateColumn < row.length) {
+      const state = plainToken(row[stateColumn])
+      if (LIVE_STATES.has(state)) liveLines.push(lineNumber)
+    }
+  }
+  return liveLines
 }
 
 function cells(line) {
@@ -136,6 +185,13 @@ export function parseExecutionRegisterText(text, source = 'execution plan') {
   if (strayRanges.length > 0) {
     const where = strayRanges.map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`)).join(', ')
     findings.push(`${source} has text inside the execution register that is not the NOW pointer, IDLE metadata, or a task-table row at line(s) ${where}`)
+  }
+
+  const outsideLiveLines = findTaskTableLinesOutsideRegister(text)
+  if (outsideLiveLines.length > 0) {
+    findings.push(
+      `${source} has a task table with live execution state outside the execution register at line(s) ${formatLineRanges(outsideLiveLines)}; every live step belongs in the canonical register`,
+    )
   }
 
   if (ordered.length === 0 && pointer !== 'IDLE') {

@@ -5,6 +5,8 @@ import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkCompletionProofs } from './completion-proof.mjs'
 import {
+  findTaskTableLinesOutsideRegister,
+  formatLineRanges,
   parseExecutionRegisterText,
   REGISTER_END,
   REGISTER_START,
@@ -142,6 +144,14 @@ export function checkExecutionProject({ root = process.cwd(), configPath = DEFAU
     }
     if (role !== 'canonical' && /\*\*Remaining, in order:\*\*/i.test(text)) {
       findings.push(`${path} is noncanonical but declares remaining work in order`)
+    }
+    if (role !== 'canonical' && role !== 'archive') {
+      const outsideLiveLines = findTaskTableLinesOutsideRegister(text)
+      if (outsideLiveLines.length > 0) {
+        findings.push(
+          `${path} is noncanonical (${role}) but contains a task table with live execution state at line(s) ${formatLineRanges(outsideLiveLines)}`,
+        )
+      }
     }
   }
 

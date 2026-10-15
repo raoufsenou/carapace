@@ -247,6 +247,21 @@ test('rejects supporting tables inside the bounded register', () => {
   ])
 })
 
+test('rejects a substep or audit task table with live state outside the bounded register', () => {
+  const root = fixture()
+  const canonicalPath = join(root, 'docs', 'execution-plan.md')
+  writeFileSync(
+    canonicalPath,
+    `${readFileSync(canonicalPath, 'utf8')}\n## Substeps\n\n| ID | State | Work |\n| --- | --- | --- |\n| \`BWA-1\` | \`DONE\` | Earlier substep. |\n| \`BWA-12\` | **NOW** | Active substep outside register. |\n| \`BWA-13\` | \`QUEUED\` | Queued substep outside register. |\n`,
+  )
+  const findings = checkExecutionProject({ root })
+  assert.ok(
+    findings.some((finding) =>
+      finding.includes('docs/execution-plan.md has a task table with live execution state outside the execution register at line(s)'),
+    ),
+  )
+})
+
 test('rejects notes, headings, and prose inside the bounded register', () => {
   const text = register(
     ['| 1 | `TASK-TWO` | `IMPLEMENTATION` | `NOW` | Current. | Finding. |'],
