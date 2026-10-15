@@ -1,8 +1,8 @@
 ---
 name: carapace
-description: Orchestrated delivery flow built around execution-plan-integrity and app-slop-audit. Researches repo state and fan-out feasibility to draft state-accurate prompts (default/prompt), onboards or migrates repositories (`setup`), drives the state-aware app-slop-audit lifecycle (`audit`), and executes single NOW tasks or parallel worktree batches using tiered worker subagents (carapace-fable / carapace-heavy / carapace-careful / carapace-medium / carapace-light) with adversarial review, semantic closure proofs, and live progress updates. Invoke with /carapace [setup | audit [ui|non-ui] [app...] | <task or batch instruction>].
+description: Orchestrated delivery flow built around execution-plan-integrity and app-slop-audit. Researches repo state and fan-out feasibility to draft state-accurate prompts (default/next), onboards or migrates repositories (`setup`), runs or reconciles audits (`audit`), records verdicts and queues accepted steps in the canonical register (`decide`), and executes single NOW tasks or parallel worktree batches (`run`) using tiered worker subagents (carapace-fable / carapace-heavy / carapace-careful / carapace-medium / carapace-light) with adversarial review, semantic closure proofs, and live progress updates. Invoke with /carapace [setup | audit [ui|non-ui] [app...] | decide [ui|non-ui] [app...] | run [<task-id> | <batch instruction>]].
 disable-model-invocation: true
-argument-hint: "[setup | audit [ui|non-ui] [app...] | <task or batch instruction>]"
+argument-hint: "[setup | audit [ui|non-ui] [app...] | decide [ui|non-ui] [app...] | run [<task-id> | <batch instruction>]]"
 ---
 
 # Carapace
@@ -15,7 +15,7 @@ Task from the user: $ARGUMENTS
 
 1. **One plan authority (`execution-plan-integrity`)**:
    - The canonical execution register (`<!-- execution-register:start -->` ... `<!-- execution-register:end -->` in the file named by `.execution-plan-integrity.json` `canonical`) is the **sole** record of task ordering and live state (`DONE`, `NOW`, `QUEUED`, `OPEN`, `DEFERRED`, `IDLE`, `NONE`).
-   - Never create a second live queue (`docs/SPEC.md`, an unclassified `docs/PLAN.md`, `filemap.md`, or task lists inside `CLAUDE.md` / `AGENTS.md`).
+   - Never create a second live queue (`docs/SPEC.md`, an unclassified `docs/PLAN.md`, `filemap.md`, task lists inside `CLAUDE.md` / `AGENTS.md`, or unboxed substep / audit tables with `DONE`/`NOW`/`QUEUED` outside `<!-- execution-register:start/end -->` in the canonical document). Every live step (including substeps and `app-slop-audit` fix steps) belongs inside the bounded canonical register.
    - Every plan-like document in `requiredGlobs` must carry its `<!-- execution-role: canonical|evidence|validation|design|archive -->` marker.
 2. **Audit records and proofs (`app-slop-audit` + `execution-plan-integrity`)**:
    - Never copy checker code, mutation suites, or `fanout.mjs` into a target repository. Always invoke them from the installed skill directories (use the canonical skill directory path rather than a symlinked home alias when recording verification commands in proofs).
@@ -37,7 +37,7 @@ The progress bar (`mcp__carapace__progress`), harness checklist (`TodoWrite` / `
   - When starting a single task, a sequence of steps, or a batch: call `mcp__carapace__progress` with `title` (flow or batch name), `total` (number of steps/workers in this run), `done` (completed so far), `phase: "delegate"` (or `"plan"` / `"design"`), and `tasks` (`[{ title, tier, after }]` in order; `tier` without `carapace-`).
   - When delegating with `Agent`, pass the task's `title` verbatim as `description` so the Agents panel matches runs to planned tasks.
   - Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
-  - Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command for the updated repo state) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
+  - Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command for the updated repo state, such as `/carapace run <NEXT-ID>`, `/carapace decide ui`, or `/carapace setup` — never `/carapace Execute ...`) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
 - **In Codex and Cursor (where Claude Code's runtime SDK tools `mcp__carapace__progress` / `mcp__carapace__step` are absent)**:
   - Use the harness's native live checklist (`TodoWrite` in Cursor, `update_plan` in Codex) to keep the active task or batch steps visible above the composer as work progresses.
   - At the end of the turn, run `node <carapace-skill-path>/assets/status.mjs --root <repo>` and include its two-line output (`Carapace: [████░░] Done/Total (%) · NOW: <ID>` and `Next → /carapace ...`) at the bottom of your closing report.
@@ -53,8 +53,9 @@ Use when `$ARGUMENTS` is empty, starts with `prompt`, `advise`, or `next`, or wh
    - Pass the repository root and the user's raw question or intent (`$ARGUMENTS`) so `carapace-advisor` can inspect `.execution-plan-integrity.json`, `docs/execution-plan.md`, `docs/execution-proofs/`, `docs/audit/`, `git status`, and `git worktree list`.
 2. **Enforce Fan-Out Feasibility Honesty**:
    - `carapace-advisor` evaluates whether the current `NOW` and `QUEUED` rows can safely run as a parallel `VALIDATION` `Batch:` in git worktrees (`FAN-OUT READY`), require sequential coordinator steps on `main` first before fanning out (`HYBRID: SEQUENTIAL FIRST -> FAN-OUT BATCH`), must run one by one (`SEQUENTIAL ONLY`), or need an existing batch resumed (`BATCH RESUME`).
-   - If the user assumed fan-out would work on steps that touch shared paths (`packages/*`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`) or depend on an unclosed/interrupted step on `main`, surface that warning clearly so the user knows why `fanout.mjs owns` would reject a naive parallel branch and how the recommended prompt sequences it safely.
-   - Conversely, if the user didn't realize that >=2 apps have strictly disjoint queued steps, highlight the fan-out opportunity and provide both the parallel `Batch:` prompt and a conservative single-step alternative.
+   - Fan-out works both **across apps in a multi-app repo** (`apps/web`, `apps/admin`) and **across disjoint screen/module slices in a single-app repo** (`frontend/src/screens/HomeScreen.tsx`, `docs/audit/ui/web/fixes/APP-AUDIT-HOME.json`, `<proof-dir>/APP-AUDIT-HOME.json`), because `fanout.mjs owns <branch> <owned-path>...` accepts any list of repo-relative file or folder paths.
+   - If the user assumed fan-out would work on steps that touch shared paths (shared app shell/layout/router like `PaperAppLayout.tsx`, `PaperStepScreen.tsx`, `router.tsx`, `packages/*`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`, or final end-to-end test sweeps) or depend on an unclosed/interrupted step on `main`, surface that warning clearly so the user knows why `fanout.mjs owns` would reject a naive parallel branch and how the recommended prompt sequences it safely.
+   - Conversely, if multiple queued steps (across apps or across isolated screens/modules in a single app) have strictly disjoint owned paths, highlight the fan-out opportunity and provide both the parallel `Batch:` prompt and a conservative single-step alternative.
 3. **Present and Stop**:
    - Present the three sections returned by `carapace-advisor` (**1. Live State Snapshot**, **2. Fan-Out Feasibility Verdict**, **3. Recommended Prompt**) directly to the user and **stop** so they can run the prompt as-is or tweak it. Never mutate files or start execution workers in Advisor mode.
 
@@ -100,11 +101,11 @@ Do not invent bloated docs (`SPEC.md`, `filemap.md`); set up only the exact `exe
 2. Present the audit report using `execution-plan-integrity/references/report-template.md` and **stop for maintainer approval** (asking them to re-run `/carapace setup` once approved). Never combine `audit` and `apply` in one uninterrupted pass unless the user already approved the audit in this prompt.
 
 ### State 1C — Approved Migration or Schema Upgrade (`apply` / `upgrade` + `import`)
-When the maintainer has approved the State 1B audit report (or `.execution-plan-integrity.json` already exists and needs upgrade/compaction):
+When the maintainer has approved the State 1B audit report (or `.execution-plan-integrity.json` already exists and needs upgrade, compaction, or consolidation of unboxed substep/audit tables outside `<!-- execution-register:start/end -->`):
 1. Follow `execution-plan-integrity/references/migration.md` phases 1–7 (or the `Upgrade a repository that already uses this skill` section):
    - Preflight without target edits; stop on any unresolved `UNPROVABLE` claim or conflict.
    - Open `EXECUTION-PLAN-V2-MIGRATION` (or `EXECUTION-PLAN-COMPACTION`) as `NOW` when appropriate.
-   - Install `.execution-plan-integrity.json`, `docs/execution-proofs/`, role markers on all plan-like documents, and the canonical register. Snapshot superseded prose into an `archive` document rather than deleting history.
+   - Install `.execution-plan-integrity.json`, `docs/execution-proofs/`, role markers on all plan-like documents, and the canonical register. If the canonical document had unboxed substep or audit-fix tables with `DONE`/`NOW`/`QUEUED` outside `<!-- execution-register:start/end -->`, fold those live steps into the single bounded canonical register so there is only one queue. Snapshot superseded prose into an `archive` document rather than deleting history.
    - Reconstruct v2 closure proofs (`<completionProofs.directory>/<TASK-ID>.json`) for every `DONE` row from current source definitions, callers, and verification evidence.
    - Clear copied execution state from `AGENTS.md` / `CLAUDE.md` and add the canonical pointer instruction.
    - Run `execution-register.test.mjs` and `check-execution-plan.mjs --root <repo>`, close the migration task with its own proof, and re-run the checker.
@@ -112,51 +113,56 @@ When the maintainer has approved the State 1B audit report (or `.execution-plan-
 
 ---
 
-## Mode 2: `audit [ui|non-ui] [app...]` (State-Driven `app-slop-audit` Lifecycle; also accepts `reconcile` | `report` | `decide`)
+## Mode 2A: `audit [ui|non-ui] [app...]` (Run or Reconcile an Audit Round; also accepts `reconcile` | `report`)
 
-Use when `$ARGUMENTS` starts with `audit` (or legacy aliases `reconcile`, `report`, `decide`, `verdicts`), or when the user asks to run, reconcile, rewrite, or decide a UI or non-ui slop audit.
+Use when `$ARGUMENTS` starts with `audit`, `reconcile`, or `report`, or when the user asks to run, reconcile, or rewrite a UI or non-UI slop audit.
 
-Always read `app-slop-audit/SKILL.md`, `references/records.md`, and the relevant reference (`references/ui.md`, `references/non-ui.md`, `references/report.md`, `references/fixing.md`) before starting. Default to `ui` unless `non-ui` is specified or the active undecided records are in `docs/audit/non-ui/`.
+Always read `app-slop-audit/SKILL.md`, `references/records.md`, and the relevant reference (`references/ui.md`, `references/non-ui.md`, `references/report.md`, `references/fixing.md`) before starting. Default to `ui` unless `non-ui` is specified.
 
-**Inspect `docs/audit/<audit>/` first and run the matching state (never combine `audit` / `reconcile` / `report` with `decide` or `apply` in one uninterrupted pass):**
+**Inspect `docs/audit/<audit>/` first (never combine `audit` / `reconcile` / `report` with `decide` or `apply` in one uninterrupted pass):**
 
-### State 2A — Undecided Findings Waiting for Verdicts (`decide` + Automatic Register Queuing)
-Triggered when the latest `v<N>.json` (in `docs/audit/<audit>/shared/` or `docs/audit/<audit>/<app>/`) already exists and has undecided `open` findings or unanswered reopen proposals (or when the user passes verdicts / `decide`):
-1. Follow `app-slop-audit` `Mode: decide`:
-   - Walk through open findings and reopen proposals with the maintainer one question at a time (if `docs/audit/<audit>/shared/` exists, decide `shared` findings first in `docs/audit/<audit>/shared/v<N>-verdicts.json`, then each app's in `docs/audit/<audit>/<app>/v<N>-verdicts.json`).
-   - Record each decision (`accepted` with `doneWhen`, `rejected` with `reason`, `deferred` with `trigger`) and any settled principles.
-   - Update the repository's design authority (`standards.designAuthority`) with settled principles (or make that the first register step).
-2. **Bridge into `execution-plan-integrity` (`docs/execution-plan.md`)**: Group all `accepted` findings into ordered register rows following `app-slop-audit/references/fixing.md`:
-   - Step 1: Design-authority updates (if not already applied above);
-   - Step 2+: Shared foundations and accepted `shared/` findings (`packages/*`);
-   - Next: Per-app screen/module fix steps (sliced by screen or module, each naming the exact finding IDs `F...` it closes and its target app path);
-   - Final: End-to-end verification / `--complete` gate.
-   Insert these rows into the canonical register (`<!-- execution-register:start/end -->` in `docs/execution-plan.md`) with the first executable row as `NOW` (if no earlier task is currently `NOW`) and the rest as `QUEUED`.
-3. Run both `node <app-slop-audit>/assets/checker/check-records.mjs <audit>` and `node <execution-plan-integrity>/assets/checker/check-execution-plan.mjs --root <repo>`.
-
-### State 2B — Unreconciled Multi-App Round or Report Correction Needed (`reconcile` / `report`)
-Triggered when the user asks to rewrite a report from existing captures (`report`), or when >=2 apps have a latest `v<N>.json` with no verdicts yet that have not been reconciled into `docs/audit/<audit>/shared/v<N>.json`:
-- **If rewriting a report (`report`)**: Follow `app-slop-audit` `Mode: report` steps 1–8 from existing captures and records before any verdicts exist on the latest version. Verify with `check-records.mjs <audit> <app> --report` and **stop** for verdicts.
-- **If reconciling across apps (`reconcile`)**: Follow `app-slop-audit` `Mode: reconcile` steps 1–8 across all apps whose latest `v<N>.json` has no verdicts yet. Move shared-code findings into `docs/audit/<audit>/shared/v<N>.json` (and `shared/config.json` on v1), update each app's `v<N>.json` (`withdrawn` with `shared` or cut down to its local part), write `docs/audit/<audit>/shared/reports/v<N>/review.html` and rewrite each corrected app report, verify with `check-records.mjs <audit> --report`, and **stop** for verdicts (to be recorded on the next `/carapace audit` run).
-
-### State 2C — Run Next Audit Version (`v1` or `vN`, Single-App or Multi-App Fan-Out)
-Triggered when starting the first audit (`v1`) or the next round (`vN`) after earlier versions have verdicts:
-- Ensure `docs/audit/*/*/reports/` is in `.gitignore` and the committed toolkit directory named by `config.json` (e.g. `tools/audit/`) exists. If an app has no `config.json` yet, confirm severity definitions (`high`, `medium`, `low`) and `standards.designAuthority` with the maintainer one question at a time before writing `docs/audit/<audit>/<app>/config.json`.
-- **Single-app run (`<app>`)**:
-  - Follow `app-slop-audit` `Mode: audit` steps 1–9: record `git rev-parse --short HEAD`, tidy earlier report folders, capture from a production build at real-use dimensions into `docs/audit/<audit>/<app>/reports/v<N>/`, re-check every earlier non-rejected/non-obsolete finding first, inspect for new findings (`F1`, `F2`, ...), record cleared items, write `docs/audit/<audit>/<app>/reports/v<N>/review.html` from `app-slop-audit/assets/report/review.html` and `docs/audit/<audit>/<app>/v<N>.json`, verify with `node <app-slop-audit>/assets/checker/check-records.mjs <audit> <app> --report`, kill any server started for capture, and **stop** with the summary and framed decision questions.
-- **Multi-app fan-out (`<app1>, <app2>, ...`)**:
-  - Follow `app-slop-audit/SKILL.md` (`One app or several`):
-    1. Confirm `git status` is clean and no one outside the run is working in the repo; record the audit fan-out in the canonical execution register (`docs/execution-plan.md`).
-    2. Confirm severity definitions for any app missing `config.json` upfront so no worker has to ask.
-    3. Build each app at the audited commit one after another and serve each on its own isolated port with its own data copy (and external/paid calls pointed at a refusing address), recording each server's PID.
-    4. Update `mcp__carapace__progress` (`title: "Audit <audit> (<apps>)"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app concurrently. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers to the coordinator.
-    5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, automatically run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html`), run `node <app-slop-audit>/assets/checker/check-records.mjs <audit> --report`, and **stop** presenting the shared report and each app's report, followed by the decisions needed (shared findings first).
+1. **Guard against undecided findings on the latest `v<N>.json`**:
+   - If the latest `v<N>.json` (in `docs/audit/<audit>/shared/` or `docs/audit/<audit>/<app>/`) still has undecided `open` findings or unanswered reopen proposals, **do not silently jump into `decide` and do not start `v<N+1>`**:
+     - Stop and ask one framed question: whether to record verdicts on the open findings of `v<N>` first (`/carapace decide <audit> [app]`, recommended) before starting a new audit version.
+2. **Unreconciled Multi-App Round or Report Correction (`reconcile` / `report`)**:
+   - **If rewriting a report (`report`)**: Follow `app-slop-audit` `Mode: report` steps 1–8 from existing captures and records before any verdicts exist on the latest version. Verify with `check-records.mjs <audit> <app> --report` and **stop** with `nextPrompt: "/carapace decide <audit> <app>"`.
+   - **If reconciling across apps (`reconcile`)**: Follow `app-slop-audit` `Mode: reconcile` steps 1–8 across all apps whose latest `v<N>.json` has no verdicts yet. Move shared-code findings into `docs/audit/<audit>/shared/v<N>.json` (and `shared/config.json` on v1), update each app's `v<N>.json` (`withdrawn` with `shared` or cut down to its local part), write `docs/audit/<audit>/shared/reports/v<N>/review.html` and rewrite each corrected app report, verify with `check-records.mjs <audit> --report`, and **stop** with `nextPrompt: "/carapace decide <audit>"`.
+3. **Run Next Audit Version (`v1` or `vN`, Single-App or Multi-App Fan-Out)**:
+   - Ensure `docs/audit/*/*/reports/` is in `.gitignore` and the committed toolkit directory named by `config.json` (e.g. `tools/audit/`) exists. If an app has no `config.json` yet, confirm severity definitions (`high`, `medium`, `low`) and `standards.designAuthority` with the maintainer one question at a time before writing `docs/audit/<audit>/<app>/config.json`.
+   - **Single-app run (`<app>`)**:
+     - Follow `app-slop-audit` `Mode: audit` steps 1–9: record `git rev-parse --short HEAD`, tidy earlier report folders, capture from a production build at real-use dimensions into `docs/audit/<audit>/<app>/reports/v<N>/`, re-check every earlier non-rejected/non-obsolete finding first, inspect for new findings (`F1`, `F2`, ...), record cleared items, write `docs/audit/<audit>/<app>/reports/v<N>/review.html` from `app-slop-audit/assets/report/review.html` and `docs/audit/<audit>/<app>/v<N>.json`, verify with `node <app-slop-audit>/assets/checker/check-records.mjs <audit> <app> --report`, kill any server started for capture, and **stop** with `nextPrompt: "/carapace decide <audit> <app>"`.
+   - **Multi-app fan-out (`<app1>, <app2>, ...`)**:
+     - Follow `app-slop-audit/SKILL.md` (`One app or several`):
+       1. Confirm `git status` is clean and no one outside the run is working in the repo; record the audit fan-out in the canonical execution register (`docs/execution-plan.md`).
+       2. Confirm severity definitions for any app missing `config.json` upfront so no worker has to ask.
+       3. Build each app at the audited commit one after another and serve each on its own isolated port with its own data copy (and external/paid calls pointed at a refusing address), recording each server's PID.
+       4. Update `mcp__carapace__progress` (`title: "Audit <audit> (<apps>)"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app concurrently. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers to the coordinator.
+       5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, automatically run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html`), run `node <app-slop-audit>/assets/checker/check-records.mjs <audit> --report`, and **stop** presenting the shared report and each app's report with `nextPrompt: "/carapace decide <audit>"`.
 
 ---
 
-## Mode 3: Execute Plan (`/carapace <task or batch instruction>`)
+## Mode 2B: `decide [ui|non-ui] [app...]` (Record Verdicts & Queue Steps in Canonical Register; also accepts `verdicts`)
 
-Use when the repository is already set up with `.execution-plan-integrity.json` (and optionally `docs/audit/`) and the user instructs executing the current `NOW` task, a sequence of steps, or a parallel fan-out batch.
+Use when `$ARGUMENTS` starts with `decide` or `verdicts`, or when the user gives verdicts on open `app-slop-audit` findings or reopen proposals.
+
+1. Follow `app-slop-audit` `Mode: decide`:
+   - Walk through open findings and reopen proposals with the maintainer one question at a time (if `docs/audit/<audit>/shared/` exists, decide `shared` findings first in `docs/audit/<audit>/shared/v<N>-verdicts.json`, then each app's in `docs/audit/<audit>/<app>/v<N>-verdicts.json` or `v<N>-verdicts-<M>.json` when deciding findings left open after earlier fix steps).
+   - Record each decision (`accepted` with `doneWhen`, `rejected` with `reason`, `deferred` with `trigger`) and any settled principles.
+   - Update the repository's design authority (`standards.designAuthority`) with settled principles (or make that the first register step).
+2. **Bridge into `execution-plan-integrity` (Single Canonical Register Only)**:
+   - Group all newly `accepted` findings into ordered register rows following `app-slop-audit/references/fixing.md`:
+     - Step 1: Design-authority updates (if not already applied above);
+     - Step 2+: Shared foundations, app shell/frame/rail/router, and accepted `shared/` findings;
+     - Next: Disjoint screen/module fix steps (sliced by screen or module so each step owns a clear list of files and names the exact finding IDs `F...` it closes);
+     - Final: End-to-end verification / `--complete` gate.
+   - Insert these rows directly into the bounded canonical register (`<!-- execution-register:start/end -->` in the file named by `.execution-plan-integrity.json` `canonical`) with the first executable row as `NOW` (if no earlier task is currently `NOW`) and the rest as `QUEUED`. **Never** write them into a separate table outside `<!-- execution-register:start/end -->`.
+3. Run both `node <app-slop-audit>/assets/checker/check-records.mjs <audit>` and `node <execution-plan-integrity>/assets/checker/check-execution-plan.mjs --root <repo>`, and set `nextPrompt` to `/carapace run <NOW-ID>`.
+
+---
+
+## Mode 3: `run` — Execute Plan (`/carapace run [<task-id> | <batch instruction>]` or `/carapace <task-id or instruction>`)
+
+Use when the repository is already set up with `.execution-plan-integrity.json` (and optionally `docs/audit/`) and the user instructs executing the current `NOW` task (`/carapace run <ID>` or `/carapace <ID>`), a sequence of steps, or a parallel fan-out batch.
 
 ### 1. Preflight and State Check
 
@@ -211,28 +217,28 @@ When working through the plan one task at a time:
    - **Atomic state advance**: Only after all proofs and gates pass, update the task row to `DONE` in the canonical register (reducing it to a one-line summary whose last cell starts with `Completed YYYY-MM-DD; <proof-path>.` and removing working notes now stored in `notes`) and advance `NOW` to the next ordered row (or `IDLE` / `NONE`) in the same pass.
    - Re-run `check-execution-plan.mjs --root <repo>`, update `mcp__carapace__progress` (`done`), commit if authorized, and continue to the next step if the user asked to keep going across steps.
 
-### 4B. Parallel Fan-Out / Batch Execution (`NOW` is a `Batch:` row)
+### 4B. Parallel Fan-Out / Batch Execution (`NOW` is a `Batch:` row — Multi-App OR Single-App Disjoint Slices)
 
-Never form a batch unless the maintainer directs it. When the maintainer directs running steps in parallel (e.g. one agent per app in worktrees):
+Never form a batch unless the maintainer directs it. When the maintainer directs running steps in parallel across git worktrees (either one worker per app in a multi-app repo, OR one worker per disjoint screen/module slice in a single-app repo):
 
 1. **Pre-batch feasibility check & coordinator steps**:
-   - Verify that the candidate batch steps have strictly disjoint per-app path ownership (`<app-dir>`, `docs/audit/<audit>/<app>`, `<proof-dir>/<STEP>.json`) and do not modify shared paths (`packages/*`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`).
-   - If the user asked to fan out steps where the leading step(s) touch shared paths or have uncommitted/interrupted work on `main`:
-     - If the user's prompt authorized running those prerequisite steps on `main` first (hybrid flow), complete, verify, and commit them sequentially on `main` before forming the `Batch:` over the remaining disjoint per-app steps.
-     - Otherwise, if a requested batch member itself requires shared-path edits that cannot be isolated to an app worktree (`fanout.mjs owns` would reject it), stop before creating worktrees and explain which step(s) must run sequentially on `main` first.
+   - Verify that each worker slice in the batch has a **strictly disjoint owned path list** (`<owned-path>...`, including its assigned `docs/audit/<audit>/<app>/fixes/<STEP>.json` and `<completionProofs.directory>/<STEP>.json` files) and does not modify shared paths (`packages/*`, shared app shell/layout/router files like `PaperAppLayout.tsx`, `PaperStepScreen.tsx`, `router.tsx`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`, or shared HTML mockups/test harnesses).
+   - If the user asked to fan out steps where the leading step(s) touch shared shell/foundation paths or have uncommitted/interrupted work on `main`:
+     - If the user's prompt authorized running those prerequisite steps on `main` first (hybrid flow), complete, verify, and commit them sequentially on `main` before forming the `Batch:` over the remaining disjoint steps.
+     - Otherwise, if a requested batch member itself requires shared-path edits that cannot be isolated to its worktree (`fanout.mjs owns` would reject it), stop before creating worktrees and explain which step(s) must run sequentially on `main` first.
    - Confirm `git status` is clean and no one outside the run is working in the repository.
 2. **Record the `Batch:` row in the canonical register**:
    - In the canonical register, insert or update the `VALIDATION` batch row as the sole `NOW` row immediately before its member rows (`QUEUED` or `DONE`, never `NOW` and never a batch):
-     `| <order> | \`<BATCH-ID>\` | \`VALIDATION\` | \`NOW\` | Batch: from \`<commit>\`; <app1> applies \`<STEP-1>\`, \`<STEP-2>\` on branch \`<branch1>\` in worktree \`<worktree1>\`, owning \`<paths1>\`; <app2> applies \`<STEP-3>\` on branch \`<branch2>\` in worktree \`<worktree2>\`, owning \`<paths2>\`. | Maintainer direction of YYYY-MM-DD: one agent per app. |`
+     `| <order> | \`<BATCH-ID>\` | \`VALIDATION\` | \`NOW\` | Batch: from \`<commit>\`; <slice1> applies \`<STEP-1>\`, \`<STEP-2>\` on branch \`<branch1>\` in worktree \`<worktree1>\`, owning \`<paths1>\`; <slice2> applies \`<STEP-3>\` on branch \`<branch2>\` in worktree \`<worktree2>\`, owning \`<paths2>\`. | Maintainer direction of YYYY-MM-DD: parallel worktree batch. |`
    - Verify the register passes `check-execution-plan.mjs --root <repo>` and commit the batch record on `main` so every worktree starts from the commit holding it.
 3. **Create and prepare worktrees**:
-   - For each agent/app in the batch:
+   - For each worker slice in the batch:
      `git worktree add -b <branch> <worktree> <commit>`
    - Install dependencies in each worktree as the project requires (`pnpm install`), and copy any ignored local environment files (`cp`) without reading or printing their contents.
 4. **Update `mcp__carapace__progress` (and `TodoWrite` if requested) & spawn `carapace-*` workers**:
-   - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of app agents or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per agent/member, matching the `Agent` `description`).
-   - Launch one `carapace-*` worker per app concurrently in a single message. Each worker brief must state:
-     - Its `app`, `worktree` path, `branch`, owned `paths`, and ordered member task IDs (`<STEP-ID>`) with their full register rows;
+   - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of worker slices or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per worker/member, matching the `Agent` `description`).
+   - Launch one `carapace-*` worker per slice concurrently in a single message. Each worker brief must state:
+     - Its slice/app name, `worktree` path, `branch`, exact owned `paths` (folders or individual files), and ordered member task IDs (`<STEP-ID>`) with their full register rows;
      - The committed audit `toolkit` path and the shared-code paths it must not modify;
      - The serialized command queue: every command that installs, builds, tests, serves, or measures must run via:
        `node <app-slop-audit-path>/assets/fanout/fanout.mjs run -- <command>`
@@ -249,7 +255,7 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
    - As each worker returns, process its branch one at a time from the main checkout:
      1. **Ownership check**: Run:
         `node <app-slop-audit-path>/assets/fanout/fanout.mjs owns <branch> <owned-path>...`
-        (include `<completionProofs.directory>/<STEP>.json` for its assigned steps if the proofs directory is outside the app folder).
+        (include `docs/audit/<audit>/<app>/fixes/<STEP>.json` and `<completionProofs.directory>/<STEP>.json` for its assigned steps whenever those paths are outside an owned folder).
      2. **Handle refused branches**: If `owns` refuses the branch for touching an unowned path, make the needed shared change in a coordinator step on `main`, checkout the batch base commit's version of that unowned path on the agent's branch, and re-run `owns`. If uncommitted work remains in the worktree, finish or clean it before merging.
      3. **Adversarial review**: Inspect the branch's commits, code changes, `fixes/<STEP>.json` proofs, and `<completionProofs.directory>/<STEP>.json` member closure proofs.
      4. **Merge**: Merge into `main` with `git merge --no-ff <branch>`.
@@ -275,4 +281,5 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
 
 Report concisely to the user:
 1. Which register tasks/batches closed and their proof paths, what verification and checker commands ran and their observed output, the current `NOW` pointer (`<TASK-ID>`, `IDLE`, or `NONE`), and which `carapace-*` tiers ran.
-2. **Next Step**: Always end with the deterministic `Next → /carapace ...` recommendation matching the updated repository state — pass it as `nextPrompt` in your closing `mcp__carapace__progress` call in Claude Code, or print the two-line footer from `node <carapace-skill-path>/assets/status.mjs --root <repo>` in Codex and Cursor.
+2. **Fan-Out Status (always include when ordered tasks remain)**: State in one line whether the immediate next step(s) in the canonical register must run **sequentially** (naming the shared file overlap, e.g. shared shell/layout/router files, and naming which upcoming step ID opens the next parallel fan-out window) or are **fan-out ready now** (naming the disjoint step IDs that can be batched in parallel worktrees).
+3. **Next Step**: Always end with the deterministic `Next → /carapace ...` recommendation matching the updated repository state (`/carapace run <NOW-ID>`, `/carapace decide <audit> [app]`, `/carapace setup`, or `/carapace` — never `/carapace Execute ...`) — pass it as `nextPrompt` in your closing `mcp__carapace__progress` call in Claude Code, or print the two-line footer from `node <carapace-skill-path>/assets/status.mjs --root <repo>` in Codex and Cursor.
