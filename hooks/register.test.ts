@@ -166,6 +166,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(suggested.at(-1)).toBe('/carapace')
     const panelDone = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
     expect((await panelDone.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace')
+    await panelDone.unmount()
+
+    // Writing a new audit version while the register is NONE suggests deciding verdicts for that target.
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v1.json' } as never)
+    expect(suggested.at(-1)).toBe('/carapace decide web')
+
     const bar3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     if (surface === 'terminal') {
       expect(await bar3.find({ text: /Done/ })).toBeDefined()

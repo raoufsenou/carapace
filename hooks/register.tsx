@@ -871,11 +871,15 @@ async function syncRegister($: EngineInterface, editedFile?: string): Promise<vo
     const md = await $.fs.read(canonicalPath)
     const parsed = parseRegister(md)
     if (!parsed) return
+    const auditVersionEdit = /docs\/audit\/(?:ui|non-ui)\/([^/]+)\/v\d+\.json$/.exec(editedFile ?? '')
+    if (auditVersionEdit?.[1] && parsed.nextPrompt === '/carapace') {
+      parsed.nextPrompt = `/carapace decide ${auditVersionEdit[1]}`
+    }
     await update($, panel, prev => ({ ...prev, registerPrompt: parsed.nextPrompt }))
     const editedCanonical =
       typeof editedFile === 'string' &&
       editedFile.length > 0 &&
-      (editedFile.endsWith(canonicalPath) || editedFile.endsWith(REGISTER_CONFIG))
+      (editedFile.endsWith(canonicalPath) || editedFile.endsWith(REGISTER_CONFIG) || Boolean(auditVersionEdit))
     const current = await read($, flow)
     if (current && !current.isFinished) {
       if (parsed.finished) {
@@ -931,7 +935,7 @@ export const register: Register = (on, options) => {
           finished: { type: 'boolean', description: 'True once the flow is closed.' },
           nextPrompt: {
             type: 'string',
-            description: 'Recommended next /carapace command to suggest in the prompt box and panel (e.g. "/carapace run UI-APPLY-25-WEB" or "/carapace decide ui").',
+            description: 'Recommended next /carapace command to suggest in the prompt box and panel (e.g. "/carapace run UI-APPLY-25-WEB" or "/carapace decide web").',
           },
           tasks: {
             type: 'array',
