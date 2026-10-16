@@ -79,7 +79,49 @@ function isDivider(row) {
 
 export function namedBatchMembers(work) {
   if (!/^Batch:/.test(work ?? '')) return null
+  const appliesClauses = [...work.matchAll(/\bapplies\s+([^;]+?)(?=\s+on\s+branch\b|;|\.?\s*$)/gi)]
+  if (appliesClauses.length > 0) {
+    return appliesClauses.flatMap((match) => {
+      const cleaned = match[1].replace(/\([^)]*\)/g, '')
+      return [...cleaned.matchAll(/`([A-Z][A-Z0-9-]+)`/g)].map((idMatch) => idMatch[1])
+    })
+  }
   return [...work.matchAll(/`([A-Z][A-Z0-9-]+)`/g)].map((match) => match[1])
+}
+
+function normalizeOwnedPath(raw) {
+  return raw.trim().replaceAll('\\', '/').replace(/^\.\//, '').replace(/\/+$/, '')
+}
+
+export function findBatchOwnershipOverlaps(work) {
+  if (!/^Batch:/.test(work ?? '')) return []
+  const slices = work
+    .slice('Batch:'.length)
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+  const slicePaths = []
+  for (const slice of slices) {
+    const owningMatch = /\bowning\s+(.+?)\.?\s*$/i.exec(slice)
+    if (!owningMatch) continue
+    const paths = [...owningMatch[1].matchAll(/`([^`]+)`/g)]
+      .map((match) => normalizeOwnedPath(match[1]))
+      .filter(Boolean)
+    if (paths.length > 0) slicePaths.push(paths)
+  }
+  const overlaps = []
+  for (let i = 0; i < slicePaths.length; i++) {
+    for (let j = i + 1; j < slicePaths.length; j++) {
+      for (const left of slicePaths[i]) {
+        for (const right of slicePaths[j]) {
+          if (left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)) {
+            overlaps.push(`${left} vs ${right}`)
+          }
+        }
+      }
+    }
+  }
+  return [...new Set(overlaps)]
 }
 
 export function parseOrderedRow(line) {
@@ -232,6 +274,10 @@ export function parseExecutionRegisterText(text, source = 'execution plan') {
     const repeated = members.filter((id) => named.indexOf(id) !== named.lastIndexOf(id))
     if (repeated.length > 0) findings.push(`${source} batch ${row.id} names ${repeated.join(', ')} more than once`)
     if (members.length < 2) findings.push(`${source} batch ${row.id} names ${members.length} member(s); a batch runs at least two`)
+    const overlaps = findBatchOwnershipOverlaps(row.work)
+    if (overlaps.length > 0) {
+      findings.push(`${source} batch ${row.id} has overlapping owned paths across slices: ${overlaps.join(', ')}`)
+    }
     const block = ordered.slice(index + 1, index + 1 + members.length)
     if (block.length !== members.length || block.some((member) => !members.includes(member.id))) {
       const after = block.map((member) => member.id).join(', ') || 'none'

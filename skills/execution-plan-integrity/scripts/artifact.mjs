@@ -23,9 +23,9 @@ export const ARTIFACT_SHA256 = Object.freeze({
   'references/report-template.md': 'ead9b414a89777e9add4cf38b99ea23a24541b8edbf29b657eeb2f8cd10f7d66',
   'references/completion-proof.md': 'a522c0d2d146cde08e776f7e26a0233be5f5cb36d7094363a576c24ab74e027b',
   'assets/checker/check-execution-plan.mjs': 'f7e1d3f1bf424ff3a16613981404887a7f685ccbcd5a56a10f9be12ab293998e',
-  'assets/checker/completion-proof.mjs': '838eb022eb02f87e765c93e07bcdce8d2301a3beab32bdbdef0bb5200f01716e',
-  'assets/checker/execution-register.mjs': '95d09622fc4114b783372b6c537f07ad509a0f7ac28608ac3cd79e31606df378',
-  'assets/checker/execution-register.test.mjs': '2b42947fd908726bb2fa16c3f3cd7dc9b385be2a7206c5039f0e1f8bb50140a7',
+  'assets/checker/completion-proof.mjs': '34061e9f5ec2f4e622e36e485e9b4bf8b8b2f396f82ceef60428c7ef8e146c9a',
+  'assets/checker/execution-register.mjs': '0fa40c1887c4a07e81fc3b84004a5be4406b0fec1ba7a18a711eeaec74f3d08e',
+  'assets/checker/execution-register.test.mjs': '1cb2854038119d098874058635c2b9ae645577a396d564b47745c5830ac3c8f3',
 })
 
 export const SKILL_VERIFICATION_PROOFS = Object.freeze([

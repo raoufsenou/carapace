@@ -756,3 +756,58 @@ test('rejects a closing proof that lists a register row or a listed task, or tha
     'docs/execution-proofs/TASK-ONE.json lists members, but only a VALIDATION batch or a DOCUMENTATION rollup can',
   ))
 })
+
+test('batch parser ignores finding IDs and git refs outside applies clauses and rejects overlapping owned paths', () => {
+  const withNotes = register([
+    EARLIER_ROW,
+    '| 2 | `BATCH-ONE` | `VALIDATION` | `NOW` | Batch: from `HEAD`; app1 applies `MEMBER-A` (closing `F1`, `A2`) on branch `apply/app1` in worktree `../apply/app1`, owning `apps/app1/`; app2 applies `MEMBER-B` (closing `P3`) on branch `apply/app2` in worktree `../apply/app2`, owning `apps/app2/`. | Maintainer direction. |',
+    memberRow(3, 'MEMBER-A'),
+    memberRow(4, 'MEMBER-B'),
+  ], 'BATCH-ONE')
+  assert.deepEqual(checkExecutionRegisterText(withNotes), [])
+
+  const overlapping = register([
+    EARLIER_ROW,
+    '| 2 | `BATCH-ONE` | `VALIDATION` | `NOW` | Batch: from `abc1234`; app1 applies `MEMBER-A` on branch `apply/app1` in worktree `../apply/app1`, owning `apps/web/src`; app2 applies `MEMBER-B` on branch `apply/app2` in worktree `../apply/app2`, owning `apps/web/src/screens`. | Maintainer direction. |',
+    memberRow(3, 'MEMBER-A'),
+    memberRow(4, 'MEMBER-B'),
+  ], 'BATCH-ONE')
+  assert.deepEqual(checkExecutionRegisterText(overlapping), [
+    'execution plan batch BATCH-ONE has overlapping owned paths across slices: apps/web/src vs apps/web/src/screens',
+  ])
+})
+
+test('verifies evidence and implementation symbols exist in their files and accepts record-backed verification defaults', () => {
+  const root = fixture()
+  mkdirSync(join(root, 'docs/audit/ui/web/fixes'), { recursive: true })
+  writeFileSync(join(root, 'docs/audit/ui/web/fixes/TASK-ONE.json'), '{"closed":["F1"]}\n')
+  writeProof(root, 'TASK-ONE', completionProof({
+    requirements: [{
+      id: 'REQ-ONE',
+      statement: 'Task one exports taskOne.',
+      source: { path: 'docs/execution-plan.md', anchor: 'TASK-ONE' },
+      evidence: [{ path: 'src/task-one.mjs', symbol: 'missingSymbol' }],
+      verification: [{ record: 'docs/audit/ui/web/fixes/TASK-ONE.json' }],
+    }],
+    integration: [{
+      entryPoint: 'taskOne()',
+      implementation: 'src/task-one.mjs#missingImplSymbol',
+      consumer: 'test/task-one.test.mjs',
+    }],
+  }))
+  const findings = checkExecutionProject({ root })
+  assert.ok(findings.includes('TASK-ONE requirement 1 evidence 1 symbol missingSymbol was not found in src/task-one.mjs'))
+  assert.ok(findings.includes('TASK-ONE integration 1 implementation symbol missingImplSymbol was not found in src/task-one.mjs'))
+
+  writeProof(root, 'TASK-ONE', completionProof({
+    requirements: [{
+      id: 'REQ-ONE',
+      statement: 'Task one exports taskOne.',
+      source: { path: 'docs/execution-plan.md', anchor: 'TASK-ONE' },
+      evidence: [{ path: 'src/task-one.mjs', symbol: 'taskOne' }],
+      verification: [{ record: 'docs/audit/ui/web/fixes/TASK-ONE.json' }],
+    }],
+  }))
+  assert.deepEqual(checkExecutionProject({ root }), [])
+})
+

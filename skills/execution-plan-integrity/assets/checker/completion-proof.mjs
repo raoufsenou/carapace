@@ -55,25 +55,29 @@ function proofJson(root, proofPath, findings) {
   }
 }
 
-function checkVerification(value, label, root, findings) {
+function checkVerification(value, label, root, findings, defaultDate = '') {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     findings.push(`${label} must be an object`)
     return
   }
-  if (!VERIFICATION_KINDS.has(value.kind)) findings.push(`${label} has invalid kind ${value.kind ?? '(missing)'}`)
-  if (value.result !== 'passed') findings.push(`${label} result must be passed`)
-  if (!DATE.test(value.checkedAt ?? '')) findings.push(`${label} has no valid checkedAt date`)
-  if (!nonEmpty(value.command) && !nonEmpty(value.evidence) && !nonEmpty(value.record)) {
+  const hasRecord = nonEmpty(value.record)
+  const kind = value.kind === undefined && hasRecord ? 'inspection' : value.kind
+  const result = value.result === undefined && hasRecord ? 'passed' : value.result
+  const checkedAt = value.checkedAt === undefined && hasRecord ? defaultDate : (value.checkedAt ?? '')
+  if (!VERIFICATION_KINDS.has(kind)) findings.push(`${label} has invalid kind ${value.kind ?? '(missing)'}`)
+  if (result !== 'passed') findings.push(`${label} result must be passed`)
+  if (!DATE.test(checkedAt)) findings.push(`${label} has no valid checkedAt date`)
+  if (!nonEmpty(value.command) && !nonEmpty(value.evidence) && !hasRecord) {
     findings.push(`${label} must record a command, evidence, or record path`)
   }
-  if (value.kind === 'manual' || value.kind === 'external') {
+  if (kind === 'manual' || kind === 'external') {
     repositoryPath(root, value.record, `${label} record`, findings)
   } else if (value.record !== undefined) {
     repositoryPath(root, value.record, `${label} record`, findings)
   }
 }
 
-function checkRequirement(requirement, label, root, findings) {
+function checkRequirement(requirement, label, root, findings, defaultDate = '') {
   if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) {
     findings.push(`${label} must be an object`)
     return null
@@ -94,9 +98,14 @@ function checkRequirement(requirement, label, root, findings) {
         findings.push(`${label} evidence ${index + 1} must be an object`)
         return
       }
-      repositoryPath(root, evidence.path, `${label} evidence ${index + 1}`, findings)
+      const evidencePath = repositoryPath(root, evidence.path, `${label} evidence ${index + 1}`, findings)
       if (evidence.symbol !== undefined && !nonEmpty(evidence.symbol)) {
         findings.push(`${label} evidence ${index + 1} has an empty symbol`)
+      } else if (evidencePath && nonEmpty(evidence.symbol) && existsSync(join(root, evidencePath))) {
+        const content = readFileSync(join(root, evidencePath), 'utf8')
+        if (!content.includes(evidence.symbol.trim())) {
+          findings.push(`${label} evidence ${index + 1} symbol ${evidence.symbol} was not found in ${evidencePath}`)
+        }
       }
     })
   }
@@ -104,7 +113,7 @@ function checkRequirement(requirement, label, root, findings) {
     findings.push(`${label} has no verification`)
   } else {
     requirement.verification.forEach((verification, index) => {
-      checkVerification(verification, `${label} verification ${index + 1}`, root, findings)
+      checkVerification(verification, `${label} verification ${index + 1}`, root, findings, defaultDate)
     })
   }
   return requirement.id
@@ -173,7 +182,14 @@ function checkImplementationProof(proof, row, root, findings) {
       if (!nonEmpty(trace.implementation)) findings.push(`${label} has no implementation target`)
       if (!nonEmpty(trace.consumer)) findings.push(`${label} has no consumer or durable effect`)
       if (nonEmpty(trace.implementation)) {
-        repositoryPath(root, trace.implementation.split('#')[0], `${label} implementation`, findings)
+        const [rawPath, symbol] = trace.implementation.split('#')
+        const implPath = repositoryPath(root, rawPath, `${label} implementation`, findings)
+        if (implPath && nonEmpty(symbol) && existsSync(join(root, implPath))) {
+          const content = readFileSync(join(root, implPath), 'utf8')
+          if (!content.includes(symbol.trim())) {
+            findings.push(`${label} implementation symbol ${symbol} was not found in ${implPath}`)
+          }
+        }
       }
     })
   }
@@ -289,7 +305,7 @@ function checkProof(row, context, { missing = null, keepsRow = false } = {}) {
   } else {
     const requirementIds = new Set()
     proof.requirements.forEach((requirement, index) => {
-      const id = checkRequirement(requirement, `${row.id} requirement ${index + 1}`, root, findings)
+      const id = checkRequirement(requirement, `${row.id} requirement ${index + 1}`, root, findings, proof.completedAt ?? '')
       if (id && requirementIds.has(id)) findings.push(`${proofPath} repeats requirement ID ${id}`)
       if (id) requirementIds.add(id)
     })
