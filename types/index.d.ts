@@ -47,6 +47,9 @@ export type Panel = {
   isDoneCollapsed: boolean
   autoOpenedFor: string
   registerPrompt?: string
+  activeTurnId?: string
+  isMainTurnActive?: boolean
+  isRoundDone?: boolean
 }
 
 declare module 'claude-code' {

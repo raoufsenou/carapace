@@ -250,5 +250,95 @@ for (const surface of ['terminal', 'desktop'] as const) {
       expect(await panelUi.find({ text: /⊤/ })).toBeDefined()
     }
   })
+
+  test(`${surface}: AbovePrompt advances from worker step reports and completions, and clears terminated subagents when the next job begins`, async ($, on) => {
+    mock.clock(on)
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('agent.spawn', async (_$, e) => ({ agentId: `id-${e.tool_use_id}`, model: 'claude-sonnet-5-5' }) as never)
+    on('turn.complete', () => ({ text: '' }) as never)
+    on('turn.step', async function* () {
+      return { turnId: 'turn-2', index: 0, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as never
+    })
+    on('ui.render', { component: 'AbovePrompt' }, (_$, e) => {
+      const { Box } = _$.ui.resolve(e)
+      return Box({})
+    })
+
+    // Ad-hoc carapace worker round without explicit mcp__carapace__progress calls.
+    await $.agent.spawn({
+      tool_use_id: 'w1',
+      subagentType: 'carapace-careful',
+      description: 'Fix auth middleware',
+      prompt: 'Fix auth.',
+    } as never)
+    await $.agent.spawn({
+      tool_use_id: 'w2',
+      subagentType: 'carapace-light',
+      description: 'Update auth tests',
+      prompt: 'Update tests.',
+    } as never)
+
+    // Worker 1 reports 2/4 steps (50% of 1/2 tasks = 25% overall).
+    await $.tool.call({ tool: 'mcp__carapace__step', agentId: 'id-w1', total: 4, done: 2, note: 'step 2' } as never)
+
+    const barMid = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    if (surface === 'terminal') {
+      expect(await barMid.find({ text: /Tasks 0\/2/ })).toBeDefined()
+      expect(await barMid.find({ text: /25%/ })).toBeDefined()
+    } else {
+      const svg = String((await barMid.find({ type: 'Svg' }))?.props.source)
+      expect(svg).toContain('Tasks 0/2')
+      expect(svg).toContain('25%')
+    }
+    await barMid.unmount()
+
+    // Worker 1 finishes and Worker 2 reaches 2/4 steps (1 + 0.5 of 2 tasks = 75% overall).
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ agentId: 'id-w1', reason: 'answer', answer: 'done' })
+    await $.tool.call({ tool: 'mcp__carapace__step', agentId: 'id-w2', total: 4, done: 2, note: 'halfway' } as never)
+
+    const barThreeQuarters = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    if (surface === 'terminal') {
+      expect(await barThreeQuarters.find({ text: /Tasks 1\/2/ })).toBeDefined()
+      expect(await barThreeQuarters.find({ text: /75%/ })).toBeDefined()
+    } else {
+      const svg = String((await barThreeQuarters.find({ type: 'Svg' }))?.props.source)
+      expect(svg).toContain('Tasks 1/2')
+      expect(svg).toContain('75%')
+    }
+    await barThreeQuarters.unmount()
+
+    // Worker 2 finishes and main turn completes -> bar settles at Done 100%.
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ agentId: 'id-w2', reason: 'answer', answer: 'done' })
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'round finished' })
+
+    const barDone = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    if (surface === 'terminal') {
+      expect(await barDone.find({ text: /Done/ })).toBeDefined()
+      expect(await barDone.find({ text: /100%/ })).toBeDefined()
+    } else {
+      const svg = String((await barDone.find({ type: 'Svg' }))?.props.source)
+      expect(svg).toContain('Done')
+      expect(svg).toContain('100%')
+    }
+    await barDone.unmount()
+
+    // When the user asks Claude to do another job (new main turn starts), the previous terminated workers are cleared.
+    const nextTurn = ($.turn.step as (e: unknown) => AsyncIterable<unknown>)({
+      turnId: 'turn-2',
+      index: 0,
+      model: 'claude-sonnet-5-5',
+      messageCount: 2,
+    })
+    for await (const _ of nextTurn) void _
+
+    const panelNextJob = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect(await panelNextJob.find({ text: /No subagents yet\./ })).toBeDefined()
+    expect(await panelNextJob.find({ text: /Finished/ })).toBeUndefined()
+    await panelNextJob.unmount()
+
+    const barNextJob = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    expect(await barNextJob.find({ key: 'carapace-agents' })).toBeUndefined()
+    await barNextJob.unmount()
+  })
 }
 

@@ -134,6 +134,43 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   }
 }
 
+const isScout = (type: string): boolean => /^(?:[^:]*:)?(?:Explore|carapace-advisor)$/i.test(type)
+
+const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+
+// The task's own progress when the worker reports steps; a finished run is full.
+const progressOf = (a: AgentRun): number | null => {
+  if (a.status === 'done') return 1
+  if (a.stepTotal) return Math.min(1, (a.stepDone ?? 0) / a.stepTotal)
+  return null
+}
+
+// Latest run per non-scout worker task, so retries of a task do not inflate flow counts.
+const workersOf = (list: AgentRun[]): AgentRun[] => {
+  const byTask = new Map<string, AgentRun>()
+  for (const a of list) {
+    if (isScout(a.type)) continue
+    byTask.set(norm(a.description) || a.id, a)
+  }
+  return [...byTask.values()]
+}
+
+// Combines reported flow state with live worker runs so the bar advances even when
+// the orchestrator omits intermediate or closing `progress` calls.
+const liveFlow = (f: Flow, list: AgentRun[] = []): Flow => {
+  const workers = workersOf(list)
+  if (!workers.length) return f
+  const doneWorkers = workers.filter(a => a.status === 'done').length
+  const runningWorkers = workers.filter(a => a.status === 'running').length
+  const total = Math.max(f.total, workers.length)
+  const done = Math.min(total, Math.max(f.done, doneWorkers))
+  const running = Math.max(f.running, runningWorkers)
+  const isAutoFinished = f.total === 0 && running === 0 && workers.every(a => a.status !== 'running')
+  const isFinished = f.isFinished || isAutoFinished
+  const phase: Phase = isFinished ? 'close' : f.phase === 'plan' || f.phase === 'design' ? 'delegate' : f.phase
+  return { ...f, total, done: isAutoFinished ? total : done, running, phase, isFinished }
+}
+
 const label = (f: Flow): string => {
   if (f.isFinished) return STRINGS.done
   if (f.phase === 'plan') return STRINGS.plan
@@ -142,7 +179,15 @@ const label = (f: Flow): string => {
   return `${f.phase === 'review' ? STRINGS.review : STRINGS.tasks} ${count}`
 }
 
-const ratio = (f: Flow): number => (f.isFinished ? 1 : f.total ? f.done / f.total : 0)
+const ratio = (f: Flow, list: AgentRun[] = []): number => {
+  const lf = liveFlow(f, list)
+  if (lf.isFinished) return 1
+  if (!lf.total) return 0
+  const stepFraction = workersOf(list)
+    .filter(a => a.status === 'running')
+    .reduce((sum, a) => sum + (progressOf(a) ?? 0), 0)
+  return Math.min(1, (lf.done + stepFraction) / lf.total)
+}
 
 // Deterministic noise so the dither does not shimmer between redraws.
 const noise = (x: number, y: number): number => {
@@ -187,14 +232,14 @@ const fitText = (s: string, size: number, maxW: number): string => {
   return out + '…'
 }
 
-const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
+const rowSvg = (f: Flow, W: number, isWorking: boolean, fillRatio = ratio(f)): string => {
   // The title takes what it needs, up to 40% of the row; the bar takes the rest.
   const title = fitText(f.title, 13, Math.max(60, W * 0.4))
   const BAR_X = Math.round(16 + textWidth(title, 13) + 12)
   const BAR_W = Math.max(60, W - BAR_X - 46 - CRAB_W)
   const color = f.isFinished ? DONE : ACCENT
   const y0 = (H - BAR_H) / 2
-  const fillW = Math.round(BAR_W * ratio(f))
+  const fillW = Math.round(BAR_W * fillRatio)
   const runW = f.total ? Math.round((BAR_W * Math.min(f.total, f.done + f.running)) / f.total) : 0
   const dots: string[] = []
 
@@ -224,7 +269,7 @@ const rowSvg = (f: Flow, W: number, isWorking: boolean): string => {
   const text = label(f)
   const pillW = Math.round(18 + text.length * 6.6)
   const pillX = Math.max(0, Math.min(BAR_W - pillW, fillW - pillW))
-  const percent = `${Math.round(ratio(f) * 100)}%`
+  const percent = `${Math.round(fillRatio * 100)}%`
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">
 <style>
@@ -254,8 +299,8 @@ ${CRAB_CSS}${crab(W - CRAB_W + 1, 0, 'other', false, isWorking, 0.8)}
 </svg>`
 }
 
-const barText = (f: Flow, width: number): string => {
-  const filled = Math.round(width * ratio(f))
+const barText = (f: Flow, width: number, fillRatio = ratio(f)): string => {
+  const filled = Math.round(width * fillRatio)
   return '█'.repeat(filled) + '░'.repeat(Math.max(0, width - filled))
 }
 
@@ -456,8 +501,6 @@ const modelName = (id: string): string => {
   return `${family.charAt(0).toUpperCase()}${family.slice(1).toLowerCase()} ${major}${minor ? '.' + minor : ''}`
 }
 
-const norm = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-
 const fmtTokens = (n: number): string =>
   n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : `${Math.round(n)}`
 
@@ -614,8 +657,6 @@ const COSTUMES: Record<string, (f: Fill, t: string) => void> = {
   other: f => crabBody(f),
 }
 
-const isScout = (type: string): boolean => /^(?:[^:]*:)?(?:Explore|carapace-advisor)$/i.test(type)
-
 const costumeOf = (type: string): string => (isScout(type) ? 'explore' : tierOf(type))
 
 const CRAB_SCALE = 1.1
@@ -667,13 +708,6 @@ ${tile(0, STRINGS.cost, '≈' + fmtCost(t.cost))}${tile(1, STRINGS.tokens, fmtTo
 }
 
 const headerHeight = (title: string): number => (title ? 72 : 44)
-
-// The task's own progress when the worker reports steps; a finished run is full.
-const progressOf = (a: AgentRun): number | null => {
-  if (a.status === 'done') return 1
-  if (a.stepTotal) return Math.min(1, (a.stepDone ?? 0) / a.stepTotal)
-  return null
-}
 
 const ctxOf = (a: AgentRun): number => (a.contextMax ? Math.min(100, Math.round((a.contextTokens / a.contextMax) * 100)) : 0)
 
@@ -914,6 +948,23 @@ async function syncRegister($: EngineInterface, editedFile?: string): Promise<vo
   }
 }
 
+async function pruneCompletedRoundIfIdle($: EngineInterface): Promise<void> {
+  const [list, curFlow, p] = await Promise.all([read($, agents), read($, flow), read($, panel)])
+  if (!list.length || list.some(a => a.status === 'running')) return
+  const workers = workersOf(list)
+  const doneWorkers = workers.filter(a => a.status === 'done').length
+  const isActivePlannedFlow =
+    Boolean(curFlow && !curFlow.isFinished && curFlow.total > 0 && !p.isRoundDone) &&
+    (doneWorkers < curFlow.total || plannedOf(curFlow, list).length > 0)
+  if (isActivePlannedFlow) return
+
+  await update($, agents, l => l.filter(a => a.status === 'running'))
+  await update($, panel, prev => ({ ...prev, isRoundDone: false, autoOpenedFor: '' }))
+  if (curFlow && (curFlow.isFinished || curFlow.total === 0 || p.isRoundDone)) {
+    await update($, flow, () => null)
+  }
+}
+
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -953,6 +1004,7 @@ export const register: Register = (on, options) => {
           },
         },
       },
+      isDeferred: false,
     })
     await $.tool.register({
       name: 'step',
@@ -1001,9 +1053,10 @@ export const register: Register = (on, options) => {
     if (e.agentId) return { result: 'ignored: only the main session reports the flow' }
     const input = e as unknown as ProgressInput
     const prev = await read($, flow)
-    if (isNewFlow(prev, input) && input.title !== undefined) {
+    if (isNewFlow(prev, input) && !input.finished) {
       // A new flow starts with a clean list; agents still running stay.
       await update($, agents, list => list.filter(a => a.status === 'running'))
+      await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '' }))
     }
     const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
     if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
@@ -1016,6 +1069,10 @@ export const register: Register = (on, options) => {
   // Refresh the canonical execution-register suggestion when the main session edits files or runs commands.
   for (const tool of ['Write', 'Edit', 'MultiEdit', 'Bash'] as const) {
     on('tool.call', { tool }, async ($, e, next) => {
+      if (!e.agentId) {
+        const p = await read($, panel)
+        if (p.isRoundDone) await pruneCompletedRoundIfIdle($)
+      }
       const res = await next(e)
       const filePath = typeof (e as { file_path?: unknown }).file_path === 'string' ? String((e as { file_path?: unknown }).file_path) : undefined
       if (!e.agentId) await syncRegister($, filePath)
@@ -1043,6 +1100,7 @@ export const register: Register = (on, options) => {
 
   // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    await pruneCompletedRoundIfIdle($)
     const type = String(e.subagent_type ?? '')
     const cur = await read($, flow)
     if (isScout(type) || (!isCarapace(type) && (!cur || cur.isFinished))) return next(e)
@@ -1059,7 +1117,11 @@ export const register: Register = (on, options) => {
   })
 
   on('agent.spawn', async ($, e, next) => {
-    const curFlow = await read($, flow)
+    await pruneCompletedRoundIfIdle($)
+    let curFlow = await read($, flow)
+    if (isCarapace(e.subagentType) && !isScout(e.subagentType) && (!curFlow || curFlow.isFinished)) {
+      curFlow = await update($, flow, prev => (prev && !prev.isFinished ? prev : { ...blank(), phase: 'delegate' }))
+    }
     const isFlowActive = Boolean(curFlow && !curFlow.isFinished)
     const isUnbriefed = !isScout(e.subagentType) && (isCarapace(e.subagentType) || isFlowActive) && !e.prompt.includes(STEP_TOOL)
     const started = await next(isUnbriefed ? { ...e, prompt: e.prompt + STEP_BRIEF } : e)
@@ -1099,8 +1161,34 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  // Each model request of a subagent: live context, tokens and cost.
+  // Each model request: main-session steps clear settled prior rounds; subagent steps report live usage.
   on('turn.step', async function* ($, e, next) {
+    if (!e.agentId) {
+      const [p, f, list] = await Promise.all([read($, panel), read($, flow), read($, agents)])
+      const isNewTurn =
+        Boolean(p.isRoundDone) ||
+        Boolean(p.activeTurnId && e.turnId && p.activeTurnId !== e.turnId) ||
+        (e.index === 0 && !p.isMainTurnActive && list.length > 0 && list.every(a => a.status !== 'running'))
+      if (isNewTurn) {
+        await update($, agents, l => l.filter(a => a.status === 'running'))
+        if (f && (f.isFinished || (workersOf(list).length > 0 && !list.some(a => a.status === 'running')))) {
+          await update($, flow, () => null)
+        }
+        await update($, panel, prev => ({
+          ...prev,
+          activeTurnId: e.turnId || prev.activeTurnId,
+          isMainTurnActive: true,
+          isRoundDone: false,
+          autoOpenedFor: '',
+        }))
+      } else {
+        await update($, panel, prev => ({
+          ...prev,
+          activeTurnId: e.turnId || prev.activeTurnId,
+          isMainTurnActive: true,
+        }))
+      }
+    }
     const result = yield* next(e)
     const agentId = e.agentId
     const usage = result.usage
@@ -1141,7 +1229,7 @@ export const register: Register = (on, options) => {
     const agentId = e.agentId
     if (agentId) {
       const at = await $.clock.now()
-      await update($, agents, list =>
+      const updated = await update($, agents, list =>
         list.map((a): AgentRun => {
           if (a.agentId !== agentId) return a
           // A run whose steps went unseen still gets the turn's own sum.
@@ -1165,6 +1253,32 @@ export const register: Register = (on, options) => {
         }),
       )
       await update($, now, () => at)
+      const p = await read($, panel)
+      if (!p.isMainTurnActive && updated.length > 0 && !updated.some(a => a.status === 'running')) {
+        await update($, panel, prev => ({ ...prev, isRoundDone: true }))
+        const f = await read($, flow)
+        if (f && !f.isFinished && workersOf(updated).length > 0) {
+          await update($, flow, prev => (prev ? { ...liveFlow(prev, updated), running: 0, phase: 'close', isFinished: true } : prev))
+        }
+      }
+    } else {
+      const [list, f] = await Promise.all([read($, agents), read($, flow)])
+      const hasRunning = list.some(a => a.status === 'running')
+      await update($, panel, prev => ({
+        ...prev,
+        isMainTurnActive: false,
+        ...(list.length > 0 && !hasRunning ? { isRoundDone: true } : {}),
+      }))
+      if (f && !f.isFinished && !hasRunning) {
+        const workers = workersOf(list)
+        const doneWorkers = workers.filter(a => a.status === 'done').length
+        if (workers.length > 0 && (f.total === 0 || doneWorkers >= f.total || plannedOf(f, list).length === 0)) {
+          const total = Math.max(f.total, workers.length)
+          await update($, flow, prev => (prev ? { ...prev, total, done: total, running: 0, phase: 'close', isFinished: true } : prev))
+        } else if (f.total === 0 && workers.length === 0 && f.tasks.length === 0) {
+          await update($, flow, () => null)
+        }
+      }
     }
     return next(e)
   })
@@ -1174,7 +1288,8 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const list = await read($, agents)
-    const f = await read($, flow)
+    const rawFlow = await read($, flow)
+    const f = rawFlow ? liveFlow(rawFlow, list) : null
     const p: Panel = await read($, panel)
     const at = Math.max(await read($, now), ...list.map(a => a.startedAt), 0)
 
@@ -1363,8 +1478,8 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const f = await read($, flow)
-    if (f === null || e.props.hasSurvey) return next(e)
+    const rawFlow = await read($, flow)
+    if (rawFlow === null || e.props.hasSurvey) return next(e)
     // Draw this row with the other mods' bands beneath it. Claude Code's own placeholder ({ type: 'engine' }) is
     // never nested: the desktop drops a band that nests it.
     const drawn = await Promise.resolve(next(e)).catch(() => null)
@@ -1373,12 +1488,14 @@ export const register: Register = (on, options) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
     const list = await read($, agents)
+    const f = liveFlow(rawFlow, list)
+    const fillRatio = ratio(rawFlow, list)
     const crew = list.length + plannedOf(f, list).length
-    const isWorking = list.some(a => a.status === 'running')
+    const isWorking = list.some(a => a.status === 'running') || f.running > 0
     const crewButton = (
       <Button key="carapace-agents" label={`×${crew}`} plain onPress={() => void togglePane($)} />
     )
-    const percent = `${Math.round(ratio(f) * 100)}%`
+    const percent = `${Math.round(fillRatio * 100)}%`
     const dismiss = (
       <Button
         key="carapace-dismiss"
@@ -1398,7 +1515,7 @@ export const register: Register = (on, options) => {
       return (
         <Box flexDirection="column">
           <Box flexDirection="row" alignItems="center" gap={1}>
-            <Svg source={rowSvg(f, width, isWorking)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
+            <Svg source={rowSvg(f, width, isWorking, fillRatio)} alt={`${f.title}: ${label(f)}, ${percent}`} width={width} height={H} />
             {crewButton}
             {dismiss}
           </Box>
@@ -1417,7 +1534,7 @@ export const register: Register = (on, options) => {
             <Text color={f.isFinished ? DONE : ACCENT}>● </Text>
             <Text wrap="truncate-end">{f.title}</Text>
           </Box>
-          <Text color={f.isFinished ? DONE : ACCENT}>{barText(f, width)}</Text>
+          <Text color={f.isFinished ? DONE : ACCENT}>{barText(f, width, fillRatio)}</Text>
           <Text bold>{label(f)}</Text>
           <Text dimColor>{percent}</Text>
           <Text color={CLAY}>▣</Text>
