@@ -19,10 +19,11 @@ Task from the user: $ARGUMENTS
    - Every plan-like document in `requiredGlobs` must carry its `<!-- execution-role: canonical|evidence|validation|design|archive -->` marker.
 2. **Audit records and proofs (`app-slop-audit` + `execution-plan-integrity`)**:
    - Never copy checker code, mutation suites, or `fanout.mjs` into a target repository. Always invoke them from the sibling skill directories relative to `<carapace-skill-path>`:
-     - `execution-plan-integrity` checker: `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>` (and `execution-register.test.mjs`)
+     - `execution-plan-integrity` checker: `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>`
      - `app-slop-audit` checker: `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs`
      - `app-slop-audit` worktree queue & ownership checker: `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs`
      - `app-slop-audit` report template: `<carapace-skill-path>/../app-slop-audit/assets/report/review.html`
+   - Never read the `.mjs` implementation source of `status.mjs`, `check-execution-plan.mjs`, `execution-register.mjs`, `check-records.mjs`, `records.mjs`, or `report.mjs`, and never run `execution-register.test.mjs` on user repositories (that self-test is only for developing the checker itself). Run the CLI scripts directly.
    - Never mark a task `DONE` without a valid semantic closure proof at `<completionProofs.directory>/<TASK-ID>.json` passing `check-execution-plan.mjs` (and, for `app-slop-audit` fix steps, a fix record at `docs/audit/<audit>/<app>/fixes/<STEP>.json` passing `check-records.mjs`).
 3. **Git and secret safety**:
    - Read repository state (`git status`) before any state-dependent command.
@@ -38,7 +39,8 @@ Task from the user: $ARGUMENTS
 The progress bar (`mcp__carapace__progress`), harness checklist (`TodoWrite` / `update_plan`), and `status.mjs` output are a **live view for the user, never a second queue**: the canonical execution register stays the record.
 
 - **In Claude Code (`mcp__carapace__progress` available; load via ToolSearch `select:mcp__carapace__progress` if deferred)**:
-  - When starting a single task, a sequence of steps, or a batch: call `mcp__carapace__progress` with `title` (flow or batch name), `total` (number of steps/workers in this run), `done` (completed so far), `phase: "delegate"` (or `"plan"` / `"design"`), and `tasks` (`[{ title, tier, after }]` in order; `tier` without `carapace-`).
+  - Do **not** call `mcp__carapace__progress` on read-only status checks (bare `/carapace`). Call it only when executing a workflow (`setup`, `audit`, `decide`, `run`).
+  - When starting a single task, an audit, a sequence of steps, or a batch: call `mcp__carapace__progress` immediately at the start of the turn with `title` (flow or batch name), `total` (number of steps/workers in this run, `>= 1`), `done` (completed so far), `phase: "delegate"` (or `"plan"` / `"design"`), and `tasks` (`[{ title, tier, after }]` in order; `tier` without `carapace-`).
   - When delegating with `Agent`, pass the task's `title` verbatim as `description` so the Agents panel matches runs to planned tasks.
   - Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
   - Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command from `status.mjs --json`, such as `/carapace run <NEXT-ID>`, `/carapace decide <app>`, `/carapace reconcile shared findings`, or `/carapace setup` — never `/carapace Execute ...`) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
@@ -58,12 +60,12 @@ node <carapace-skill-path>/assets/status.mjs --root <repo> --json [--prompt "<$A
 
 ### Form 1: Bare `/carapace` (or `next` / `prompt` / `advise`) — Interactive Control Menu & Advisor
 When `$ARGUMENTS` is empty (or asks what to do next / asks for a prompt or fan-out analysis without authorizing immediate execution):
-1. Inspect the JSON output from `status.mjs --root <repo> --json` (or spawn `carapace-advisor` when deep cross-file fan-out analysis or a full copy-ready orchestration prompt is needed).
+1. Inspect the JSON output from `status.mjs --root <repo> --json`. **When the user asks for `advise`, `prompt`, a fan-out feasibility analysis, or a copy-ready orchestration prompt, always spawn `carapace-advisor` (`carapace:carapace-advisor`)** to inspect cross-file path overlap, shared prerequisites, and worktree readiness and generate the orchestration prompt.
 2. Present:
    - **Live State Snapshot**: Progress bar, `NOW` pointer, any interrupted step or active worktrees on disk, and any unreconciled or undecided `docs/audit/` rounds.
    - **Numbered Options Menu**: List the tailored `options` from `status.mjs --json`, always placing the recommended action first as **`1. ... (Recommended)`** with its exact command (`command`).
    - When multiple `QUEUED` steps exist or fan-out is relevant, state the **Fan-Out Feasibility Verdict** (`FAN-OUT READY`, `HYBRID: SEQUENTIAL FIRST -> FAN-OUT BATCH`, `SEQUENTIAL ONLY`, or `BATCH RESUME`) and include the copy-ready prompt from `carapace-advisor`.
-3. **Stop** and wait for the user's choice (or `Tab` + `Enter`). Never mutate files on a bare `/carapace` call.
+3. **Stop** and wait for the user's choice (or `Tab` + `Enter`). Never mutate files or call `mcp__carapace__progress` on a bare `/carapace` call.
 
 ### Form 2: `/carapace <prompt>` — Preflight Conflict Check -> Execute
 When `$ARGUMENTS` contains any instruction (either natural language like `/carapace audit the checkout screens`, `/carapace fix the login timeout`, or a `Tab`-completed action like `/carapace run <ID>`, `/carapace decide <app>`, `/carapace setup`):
@@ -101,9 +103,23 @@ Do not invent bloated docs (`SPEC.md`, `filemap.md`); set up only the exact `exe
      }
    }
    ```
-3. Create `docs/execution-proofs/` and `docs/execution-plan.md` with `<!-- execution-role: canonical -->` and a valid bounded register (`<!-- execution-register:start -->` ... `<!-- execution-register:end -->`):
-   - If initial tasks are defined from the user's request, populate the ordered table (`| Order | ID | Kind | State | Work and completion boundary | Source or evidence |`) with Task 1 as `NOW` (``NOW`: `<FIRST-TASK-ID>``) and subsequent tasks as `QUEUED`.
-   - If no executable task is authorized yet, keep an unordered `OPEN` or `DEFERRED` row and set ``NOW`: `IDLE`` with valid `IDLE REASON` and `RESUME WHEN` fields referencing that backticked ID.
+3. Create `docs/execution-proofs/` and `docs/execution-plan.md` directly from the template below (do **not** read `execution-plan-integrity` reference or checker files for a greenfield setup):
+   - When no executable task is authorized yet (`NOW` is `IDLE` awaiting initial audit/verdicts):
+     ```markdown
+     <!-- execution-role: canonical -->
+     # Execution Plan
+
+     <!-- execution-register:start -->
+     `NOW`: `IDLE`
+     `IDLE REASON`: Repository initialized (`<OPEN-TASK-ID>`); awaiting initial audit and maintainer verdicts before scheduling ordered execution tasks.
+     `RESUME WHEN`: Initial audit and maintainer verdicts complete for `<OPEN-TASK-ID>`.
+
+     | ID | Kind | State | Work and completion boundary | Source or evidence |
+     | --- | --- | --- | --- | --- |
+     | `<OPEN-TASK-ID>` | `VALIDATION` | `OPEN` | Run v1 audit and record maintainer verdicts before queuing ordered fix steps. | Initial onboarding |
+     <!-- execution-register:end -->
+     ```
+   - When initial ordered tasks are already defined from the user's request, omit `IDLE REASON` / `RESUME WHEN`, set ``NOW`: `<FIRST-TASK-ID>``, and use the 6-column ordered table (`| Order | ID | Kind | State | Work and completion boundary | Source or evidence |`) with Task `1` as `NOW` and subsequent tasks as `QUEUED`. Every `Kind` is one of `IMPLEMENTATION | DESIGN | DECISION | MIGRATION | VALIDATION | OPERATIONS | DOCUMENTATION`.
 4. Add the required repository instruction to `AGENTS.md` / `CLAUDE.md` (`execution-plan-integrity` apply step 7):
    > Agents begin with the stable `NOW` ID in `docs/execution-plan.md`, never create a second live queue, never copy execution state into instruction files, and treat `archive` documents and the text closure proofs preserve as history, never as instructions.
 5. Ensure `docs/audit/*/*/reports/` is in `.gitignore`. If the user named the app(s) and confirmed severity definitions (`high`, `medium`, `low`) and `designAuthority`, write `docs/audit/<audit>/<app>/config.json` following `app-slop-audit/references/records.md`.
@@ -124,7 +140,7 @@ When the maintainer has approved the State 1B audit report (or `.execution-plan-
    - Install `.execution-plan-integrity.json` (with `"canonical": "docs/execution-plan.md"`), `docs/execution-proofs/`, role markers on all plan-like documents, and the canonical register in `docs/execution-plan.md`. If a legacy tracker (`PLAN.md`, `docs/FEATURES.md`, etc.) held the register, move its live register to `docs/execution-plan.md` and classify any retained historical file as `archive`. If the canonical document had unboxed substep or audit-fix tables with `DONE`/`NOW`/`QUEUED` outside `<!-- execution-register:start/end -->`, fold those live steps into the single bounded canonical register so there is only one queue. Snapshot superseded prose into an `archive` document rather than deleting history.
    - Reconstruct v2 closure proofs (`<completionProofs.directory>/<TASK-ID>.json`) for every `DONE` row from current source definitions, callers, and verification evidence.
    - Clear copied execution state from `AGENTS.md` / `CLAUDE.md` and add the canonical pointer instruction.
-   - Run `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/execution-register.test.mjs` and `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>`, close the migration task with its own proof, and re-run the checker.
+   - Run `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>`, close the migration task with its own proof, and re-run the checker.
 2. If prior audit reports exist without `docs/audit/` records, run `app-slop-audit` `Mode: import` (and set up the toolkit if missing), then verify with `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs --report`.
 
 ---
@@ -133,7 +149,7 @@ When the maintainer has approved the State 1B audit report (or `.execution-plan-
 
 Use when the user asks to run, reconcile, or rewrite an audit (with or without naming `ui` / `non-ui`).
 
-Always read `app-slop-audit/SKILL.md`, `references/records.md`, and the relevant reference (`references/ui.md`, `references/non-ui.md`, `references/report.md`, `references/fixing.md`) before starting.
+Read only `app-slop-audit/references/records.md` and the single mode reference you need (`references/ui.md` or `references/non-ui.md`, plus `references/report.md` when generating `review.html`). **Never** read `check-records.mjs`, `records.mjs`, `report.mjs`, `report.css`, or `report.js` source files (copy `report.css` and `report.js` via `cp`). Call `mcp__carapace__progress(title: "Audit <target>", phase: "plan", total: 1, done: 0)` at the start of the audit turn so the live HUD appears immediately.
 
 **Resolving Audit Scope Without Forcing `ui` / `non-ui` Flags**:
 - Internal records live under `docs/audit/ui/` (screens & visual UI) and `docs/audit/non-ui/` (backend, data, API, CLI, and code).
@@ -157,23 +173,25 @@ Always read `app-slop-audit/SKILL.md`, `references/records.md`, and the relevant
    - Ensure `docs/audit/*/*/reports/` is in `.gitignore` and the committed toolkit directory named by `config.json` (e.g. `tools/audit/`) exists. If an app has no `config.json` yet, confirm severity definitions (`high`, `medium`, `low`) and `standards.designAuthority` with the maintainer one question at a time before writing `docs/audit/<audit>/<app>/config.json`.
    - If `status.mjs --json` shows `auditState.targets` already has a clean `v<N>.json` at `HEAD` (`isClean: true` and `matchesHead: true`, e.g. left uncommitted from an interrupted turn), verify it with `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> <app>` instead of re-running the audit from scratch.
    - **Zero-finding rule (`0` open findings)**:
-     - On a re-audit (`v<N>` with `N > 1`), if all `rechecked` items have `outcome: "holds"`, `raised` is `[]`, and `reopens` is empty/absent, **omit `"report"` from `v<N>.json` and do NOT create `docs/audit/<audit>/<app>/reports/v<N>/`** (`check-records.mjs --report` rejects a `reports/v<N>` folder when `0` findings are open).
+     - Every `v<N>.json` **always** requires `"report": "docs/audit/<audit>/<app>/reports/v<N>/review.html"` and a valid `reports/v<N>/review.html` (with `report.css` and `report.js` copied beside it via `cp`), even when `raised` is `[]` and `0` findings are open (`review.html` records each `rechecked` finding that `holds`, any `cleared` items, and the `id="coverage"` appendix, with no finding cards). On a multi-app re-audit (`v<N>` with `N > 1`), if no app raises or reopens any shared-code finding, `docs/audit/<audit>/shared/` stays at its existing version and does not add a `v<N>.json`.
      - Whenever an audit (`v1` or `v<N>`) finishes with **0 open findings**, do **not** set `nextPrompt` to `/carapace decide <app>`! Instead, re-run `node <carapace-skill-path>/assets/status.mjs --root <repo> --json` and use its `nextPrompt` (which automatically advances to backend/non-UI audit, remaining `OPEN`/`DEFERRED` register work, or `/carapace`).
    - **Single-app run (`<app>`)**:
-     - Follow `app-slop-audit` `Mode: audit` steps 1–9: record `git rev-parse --short HEAD`, tidy earlier report folders, capture from a production build at real-use dimensions into `docs/audit/<audit>/<app>/reports/v<N>/` (when open findings exist or on `v1`), re-check every earlier non-rejected/non-obsolete finding first, inspect for new findings (`A1`, `B1`, ...), write `docs/audit/<audit>/<app>/v<N>.json` (and `reports/v<N>/review.html` from `<carapace-skill-path>/../app-slop-audit/assets/report/review.html` when open findings exist), verify with `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> <app> --report`, kill any server started for capture, and **stop** with `nextPrompt: "/carapace decide <app>"` (or the next stage from `status.mjs --json` if `0` open findings were raised).
+     - Follow `app-slop-audit` `Mode: audit` steps 1–9: record `git rev-parse --short HEAD`, tidy earlier report folders, capture from a production build at real-use dimensions into `docs/audit/<audit>/<app>/reports/v<N>/` (in `reports/v<N>/capture/*.mjs` scripts, import toolkit modules via `pathToFileURL(path.resolve(process.cwd(), 'tools/audit/...')).href` rather than counting `../` relative segments), re-check every earlier non-rejected/non-obsolete finding first, inspect for new findings (`A1`, `B1`, ...), write `docs/audit/<audit>/<app>/v<N>.json` and `reports/v<N>/review.html` from `<carapace-skill-path>/../app-slop-audit/assets/report/review.html` (copying `report.css` and `report.js` beside it via `cp`), verify with `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> <app> --report`, kill any server started for capture, update `IDLE REASON` / `RESUME WHEN` in `docs/execution-plan.md` when `NOW` is `IDLE` so it reflects that `v<N>` is recorded and awaiting `/carapace decide <app>`, and **stop** with `nextPrompt: "/carapace decide <app>"` (or the next stage from `status.mjs --json` if `0` open findings were raised).
    - **Multi-app fan-out (`<app1>, <app2>, ...`)**:
      - Follow `app-slop-audit/SKILL.md` (`One app or several`):
        1. Confirm `git status` is clean and no one outside the run is working in the repo; record the audit fan-out in the canonical execution register (`docs/execution-plan.md`).
        2. Confirm severity definitions for any app missing `config.json` upfront so no worker has to ask.
        3. Build each app at the audited commit one after another and serve each on its own isolated port with its own data copy (and external/paid calls pointed at a refusing address), recording each server's PID.
-       4. Update `mcp__carapace__progress` (`title: "Audit <apps>"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app. **Browser CDP isolation for `ui` audits**: if workers share a single Chrome DevTools / CDP instance, either assign each worker its own dedicated browser tab/target ID or serialize browser navigation/screenshot commands through `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs run -- <command>` so two workers never navigate the same page tab at the same time. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and, when open findings exist, `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers to the coordinator.
-       5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, automatically run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html` when shared findings exist), run `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> --report`, and **stop** with `nextPrompt: "/carapace decide shared"` (or the next stage from `status.mjs --json` if all apps had `0` open findings).
+       4. Update `mcp__carapace__progress` (`title: "Audit <apps>"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app concurrently in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll `/tmp/` handoff files with `sleep` loops). **Browser CDP isolation for `ui` audits**: if workers share a single Chrome DevTools / CDP instance, either assign each worker its own dedicated browser tab/target ID or serialize browser navigation/screenshot commands through `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs run -- <command>` so two workers never navigate the same page tab at the same time. **No browser in `non-ui` audits**: for `non-ui` audits, workers and the coordinator must **never** launch headless Chrome/Playwright, take screenshots of `review.html`, or add browser screenshot helpers to `tools/audit/` (`check-records.mjs --report` verifies `review.html` statically); workers should use a single fast `01-capture.mjs` script (calling `mcp__carapace__step` at each milestone) and copy `report.css` / `report.js` via `cp` without reading them. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers in its final message to the coordinator.
+       5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, automatically run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html` when shared findings exist; on `v<N>` with `N > 1` and no new or reopened shared findings, leave `shared/` at its existing version), run `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> --report`, and **stop** with `nextPrompt: "/carapace decide shared"` (or the next stage from `status.mjs --json` if all apps had `0` open findings).
 
 ---
 
 ## Mode 2B: Decide Verdicts & Queue Steps (`/carapace decide ...` | `verdicts`)
 
 Use when the user asks to decide or record verdicts on open `app-slop-audit` findings or reopen proposals. (If the user did not specify `ui` or `non-ui`, resolve the target from `auditState.undecided` in `status.mjs --json`.)
+
+**Hard invariant**: Never fabricate or auto-fill `v<N>-verdicts.json` (or attribute `"by": "the maintainer"`) unless the user has explicitly supplied verdicts in the conversation. When `/carapace decide` is invoked without verdicts in the prompt, present the first open finding question and stop for the user's answer before writing `v<N>-verdicts.json` or queuing fix steps.
 
 1. Follow `app-slop-audit` `Mode: decide`:
    - Walk through open findings and reopen proposals with the maintainer one question at a time (if `docs/audit/<audit>/shared/` has open findings, decide `shared` findings first in `docs/audit/<audit>/shared/v<N>-verdicts.json`, then each app's in `docs/audit/<audit>/<app>/v<N>-verdicts.json` or `v<N>-verdicts-<M>.json` when deciding findings left open after earlier fix steps).
@@ -228,7 +246,7 @@ When working through the plan one task at a time:
 1. **Identify `NOW`**: Read the single `NOW` row in the canonical register, its requirement sources, and (if it is an `app-slop-audit` step) the accepted findings it closes.
 2. **Delegate**:
    - Update `mcp__carapace__progress` (`phase: "delegate"`, `title`, `total`, `done`, `tasks`).
-   - Spawn the chosen `carapace-*` worker via `Agent` (`description` = the task's `title`). Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
+   - Spawn the chosen `carapace-*` worker via `Agent` in the **foreground** (`run_in_background` omitted or `false`, with `description` = the task's `title`) so the orchestrator reviews and closes the step in the same turn without extra background wake-up round-trips. Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
    - Instruct the worker **not** to edit the canonical execution register document; the orchestrator updates the register after review.
 3. **Adversarial Review & Semantic Close (`execution-plan-integrity` `close` + `app-slop-audit` `apply`)**:
    - Switch `mcp__carapace__progress` `phase` to `"review"`.
@@ -239,17 +257,18 @@ When working through the plan one task at a time:
      - Run `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs`.
    - Write the closure proof `<completionProofs.directory>/<TASK-ID>.json` following `execution-plan-integrity/references/completion-proof.md`:
      - Set `schema: 1`, `taskId`, `taskKind`, `completedAt` (`YYYY-MM-DD`), and `outcome` matching `taskKind` (`IMPLEMENTATION` -> `IMPLEMENTED`, `MIGRATION` -> `MIGRATED`, `OPERATIONS` -> `OPERATING`, `DESIGN` -> `DESIGNED`, `DECISION` -> `DECIDED`, `VALIDATION` -> `VALIDATED`, `DOCUMENTATION` -> `DOCUMENTED`).
-     - Freeze stable requirement IDs (`REQ-...`), sources (`{ path, anchor }`), repository evidence (`[{ path, symbol }]` where `symbol` is a **single exact literal substring** that appears verbatim in `path` via `content.includes(symbol.trim())` — never a comma-separated symbol list, prose description, or `ClassName.method` shorthand), and verification (`[{ kind, command|evidence|record, result: "passed", checkedAt }]` where `kind` is strictly one of `test | mutation | inspection | manual | external | static` — never `"command"`, and never citing `check-execution-plan.mjs` as product verification). When an `app-slop-audit` fix file already proves a requirement, cite `{ "record": "docs/audit/<audit>/<app>/fixes/<STEP>.json" }` in `verification`.
-     - For `IMPLEMENTATION`, `MIGRATION`, or `OPERATIONS`, include `implementationLedger` (`string[]` of repo-relative file paths), `integration` (`[{ entryPoint, implementation, consumer }]` where `implementation` starts with an existing repo-relative file path, optionally followed by `#symbol` where `symbol` is a single literal substring in that file), `falsification` (`[{ assertion, kind, evidence, result: "passed" }]` where `kind` is one of `test | mutation | inspection | manual | external | static`), and `implementationDisposition: { "status": "DELIVERED" }`. If this task deletes a file or replaces a symbol cited by an earlier `DONE` proof, record `"supersedes": ["<EARLIER-TASK-ID>"]` on this proof (or `"supersededBy": "<TASK-ID>"` on the earlier proof).
+     - Freeze stable requirement IDs (`REQ-...`), sources (`{ path, anchor }`), repository evidence (`[{ path, symbol }]` where `symbol` is a **single exact literal substring** that appears verbatim in `path` via `content.includes(symbol.trim())` — never a comma-separated symbol list, prose description, or `ClassName.method` shorthand), and verification (`[{ kind, command|evidence|record, result: "passed", checkedAt }]` where `kind` is strictly one of `test | mutation | inspection | manual | external | static` — `test | mutation | static` require `command`, `inspection | manual` require `evidence`, and `external` requires a repo-relative `record` path; never use `"command"`, and never cite `check-execution-plan.mjs` as product verification). When an `app-slop-audit` fix file already proves a requirement, cite `{ "record": "docs/audit/<audit>/<app>/fixes/<STEP>.json" }` in `verification`.
+     - For `IMPLEMENTATION`, `MIGRATION`, or `OPERATIONS`, include `implementationLedger` (`string[]` of repo-relative file paths), `integration` (`[{ entryPoint, implementation, consumer }]` where `implementation` starts with an existing repo-relative file path, optionally followed by `#symbol` where `symbol` is a single literal substring in that file), `falsification` (`[{ assertion, kind, evidence, result: "passed" }]` where `kind` is one of `test | mutation | inspection | manual | external | static` — cite existing negative tests or source boundary inspections rather than writing `/tmp/` scripts that mutate files on disk), and `implementationDisposition: { "status": "DELIVERED" }`. If this task deletes a file or replaces a symbol cited by an earlier `DONE` proof, record `"supersedes": ["<EARLIER-TASK-ID>"]` on this proof (or `"supersededBy": "<TASK-ID>"` on the earlier proof).
      - For `DESIGN`, `DECISION`, `VALIDATION`, or `DOCUMENTATION`, set `implementationDisposition` to `TRACKED` (with `taskIds` naming implementation-like register tasks) or `NOT-REQUIRED` (with `reason` and `source: { path, anchor }`).
      - Preserve the task's register row verbatim on one line in `closedRow`, and any working notes removed from the canonical doc in `notes`.
-   - Run `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/execution-register.test.mjs`, `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>`, and the narrow repository verification gates.
+   - Run `node <carapace-skill-path>/../execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>` and the narrow repository verification gates.
    - **Atomic state advance**: Only after all proofs and gates pass, update the task row to `DONE` in the canonical register (reducing it to a one-line summary whose last cell starts with `Completed YYYY-MM-DD; <proof-path>.` and removing working notes now stored in `notes`) and advance `NOW` to the next ordered row (or `IDLE` / `NONE`) in the same pass.
    - Re-run `node <carapace-skill-path>/assets/status.mjs --root <repo> --check`, update `mcp__carapace__progress` (`done`), commit if authorized, and continue to the next step if the user asked to keep going across steps.
 
 ### 4B. Parallel Fan-Out / Batch Execution (`NOW` is a `Batch:` row — Multi-App OR Single-App Disjoint Slices)
 
-Never form a batch unless the maintainer directs it. When the maintainer directs running steps in parallel across git worktrees (either one worker per app in a multi-app repo, OR one worker per disjoint screen/module slice in a single-app repo):
+Never form a batch unless the maintainer directs it. When the maintainer directs running steps in parallel (either one worker per app in a multi-app repo, OR one worker per disjoint screen/module slice in a single-app repo):
+- **Uncommitted-tree fallback**: If the repository has uncommitted prerequisite changes on `main` and the user has **not** authorized `git commit` (so `git worktree add` from `HEAD` would lack the uncommitted files), you may spawn concurrent `carapace-*` workers in the current checkout **only when** their owned file sets (including `docs/audit/<audit>/<app>/fixes/<STEP>.json` and `<completionProofs.directory>/<STEP>.json`) are strictly disjoint, shared build/test commands serialize through `fanout.mjs run --`, and neither worker touches `docs/execution-plan.md`. Otherwise, when `main` is clean (or commits are authorized), use the full `Batch:` + `git worktree` protocol below:
 
 1. **Pre-batch feasibility check & coordinator steps**:
    - Verify that each worker slice in the batch has a **strictly disjoint owned path list** (`<owned-path>...`, including its assigned `docs/audit/<audit>/<app>/fixes/<STEP>.json` and `<completionProofs.directory>/<STEP>.json` files) and does not modify shared paths (`packages/*`, shared app shell/layout/router files like `PaperAppLayout.tsx`, `PaperStepScreen.tsx`, `router.tsx`, `docs/design-authority.md`, `tools/audit/`, root configs/lockfiles, `docs/audit/<audit>/shared/`, or shared HTML mockups/test harnesses).
@@ -267,7 +286,7 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
    - Install dependencies in each worktree as the project requires (`pnpm install`), and copy any ignored local environment files (`cp`) without reading or printing their contents.
 4. **Update `mcp__carapace__progress` (and `TodoWrite` if requested) & spawn `carapace-*` workers**:
    - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of worker slices or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per worker/member, matching the `Agent` `description`).
-   - Launch one `carapace-*` worker per slice concurrently in a single message. Each worker brief must state:
+   - Launch one `carapace-*` worker per slice concurrently in a single message in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll with `sleep` loops). Each worker brief must state:
      - Its slice/app name, `worktree` path, `branch`, exact owned `paths` (folders or individual files), and ordered member task IDs (`<STEP-ID>`) with their full register rows;
      - The committed audit `toolkit` path, settled audit principles, and the shared-code paths it must not modify;
      - The serialized command queue: every command that installs, builds, tests, serves, or measures must run via:
@@ -304,7 +323,7 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
      - Reduce the batch row to a one-line `DONE` summary (`Completed YYYY-MM-DD; <proof-path>.`);
      - Renumber all rows after the batch;
      - Advance the `NOW` pointer to the first row after the batch (or `IDLE` / `NONE`).
-   - Run `execution-register.test.mjs`, `check-execution-plan.mjs --root <repo>`, and (when closing an audit apply round) `check-records.mjs <audit> --complete`.
+   - Run `check-execution-plan.mjs --root <repo>` and (when closing an audit apply round) `check-records.mjs <audit> --complete`.
    - Commit if authorized, and update `mcp__carapace__progress`.
 
 ## 5. Close & Next Step Suggestion

@@ -6,7 +6,7 @@
 // or a complete JSON state & preflight conflict report (--json [--prompt "..."] [--check]).
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { readFolder, runChecks } from '../../app-slop-audit/assets/checker/check-records.mjs'
@@ -565,7 +565,9 @@ export function inspectAuditState(root, registerRows = [], headCommit = null) {
 
   for (const audit of ['ui', 'non-ui']) {
     const kindDir = join(root, 'docs', 'audit', audit)
-    const targets = listSubdirs(kindDir)
+    const targets = listSubdirs(kindDir).sort((a, b) =>
+      a === 'shared' ? -1 : b === 'shared' ? 1 : a.localeCompare(b),
+    )
     if (targets.length === 0) continue
 
     const summaries = new Map()
@@ -629,11 +631,19 @@ export function inspectAuditState(root, registerRows = [], headCommit = null) {
         })
       }
       if (target !== 'shared') {
+        const needsPostFixReaudit =
+          summary.openCount === 0 &&
+          summary.triggeredCount === 0 &&
+          summary.openReopens.length === 0 &&
+          summary.acceptedPendingCount === 0 &&
+          summary.doneCount > 0 &&
+          summary.raisedCount > 0
         const isClean =
           summary.openCount === 0 &&
           summary.triggeredCount === 0 &&
           summary.openReopens.length === 0 &&
-          summary.acceptedPendingCount === 0
+          summary.acceptedPendingCount === 0 &&
+          !needsPostFixReaudit
         const matchesHead = Boolean(
           headCommit &&
             summary.commit &&
@@ -650,6 +660,7 @@ export function inspectAuditState(root, registerRows = [], headCommit = null) {
           triggeredCount: summary.triggeredCount,
           openReopensCount: summary.openReopens.length,
           acceptedPendingCount: summary.acceptedPendingCount,
+          needsPostFixReaudit,
           isClean,
           matchesHead,
         })
@@ -713,22 +724,49 @@ function hasUiDepsInPackageJson(pkgPath) {
   }
 }
 
+function hasUiFilesInDir(dir) {
+  if (!existsSync(dir)) return false
+  if (
+    existsSync(join(dir, 'index.html')) ||
+    existsSync(join(dir, 'public', 'index.html')) ||
+    existsSync(join(dir, 'vite.config.ts')) ||
+    existsSync(join(dir, 'vite.config.js')) ||
+    existsSync(join(dir, 'vite.config.mjs')) ||
+    existsSync(join(dir, 'next.config.js')) ||
+    existsSync(join(dir, 'next.config.mjs')) ||
+    existsSync(join(dir, 'next.config.ts'))
+  ) {
+    return true
+  }
+  for (const sub of ['src', 'app', 'pages', 'components', 'screens']) {
+    const target = join(dir, sub)
+    if (!existsSync(target)) continue
+    try {
+      const entries = readdirSync(target, { withFileTypes: true })
+      if (entries.some((e) => /\.(tsx|jsx|vue|svelte|css|scss)$/.test(e.name))) {
+        return true
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return false
+}
+
 function detectAppProfile(root) {
   if (listSubdirs(join(root, 'docs', 'audit', 'ui')).length > 0) {
     return { hasUi: true }
   }
-  if (hasUiDepsInPackageJson(join(root, 'package.json'))) {
+  if (hasUiDepsInPackageJson(join(root, 'package.json')) || hasUiFilesInDir(root)) {
     return { hasUi: true }
   }
   for (const candidate of [
-    'apps',
     'frontend',
     'client',
     'web',
     'src/screens',
     'src/pages',
     'src/components',
-    'app',
     'pages',
     'frontend/src/screens',
     'frontend/src/pages',
@@ -741,12 +779,21 @@ function detectAppProfile(root) {
     }
   }
   for (const sub of listSubdirs(root)) {
-    if (sub === 'node_modules' || sub === 'docs' || sub === 'scripts' || sub === 'tools') continue
-    if (hasUiDepsInPackageJson(join(root, sub, 'package.json'))) {
+    if (sub === 'node_modules' || sub === 'docs' || sub === 'scripts' || sub === 'tools' || sub === 'artifacts') continue
+    const subPath = join(root, sub)
+    if (hasUiDepsInPackageJson(join(subPath, 'package.json')) || hasUiFilesInDir(subPath)) {
       return { hasUi: true }
     }
-    if (existsSync(join(root, sub, 'web')) || existsSync(join(root, sub, 'frontend'))) {
+    if (existsSync(join(subPath, 'web')) || existsSync(join(subPath, 'frontend'))) {
       return { hasUi: true }
+    }
+    if (sub === 'apps' || sub === 'packages') {
+      for (const nested of listSubdirs(subPath)) {
+        const nestedPath = join(subPath, nested)
+        if (hasUiDepsInPackageJson(join(nestedPath, 'package.json')) || hasUiFilesInDir(nestedPath)) {
+          return { hasUi: true }
+        }
+      }
     }
   }
   return { hasUi: false }
@@ -754,7 +801,25 @@ function detectAppProfile(root) {
 
 function readGitState(root) {
   if (!existsSync(join(root, '.git'))) {
-    return { isGitRepo: false, headCommit: null, dirtyFiles: [], worktrees: [] }
+    const outerRun = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: root,
+      encoding: 'utf8',
+      timeout: 2000,
+    })
+    const outerToplevel = outerRun.status === 0 ? outerRun.stdout.trim() : ''
+    let outerGitRoot = null
+    if (outerToplevel) {
+      try {
+        if (realpathSync(outerToplevel) !== realpathSync(root)) {
+          outerGitRoot = outerToplevel
+        }
+      } catch {
+        if (resolve(outerToplevel) !== resolve(root)) {
+          outerGitRoot = outerToplevel
+        }
+      }
+    }
+    return { isGitRepo: false, outerGitRoot, headCommit: null, dirtyFiles: [], worktrees: [] }
   }
   const headRun = spawnSync('git', ['rev-parse', '--short', 'HEAD'], {
     cwd: root,
@@ -794,7 +859,7 @@ function readGitState(root) {
     }
     if (current) worktrees.push(current)
   }
-  return { isGitRepo: true, headCommit, dirtyFiles, worktrees }
+  return { isGitRepo: true, outerGitRoot: null, headCommit, dirtyFiles, worktrees }
 }
 
 function buildStageAndOptions(status) {
@@ -864,11 +929,9 @@ function buildStageAndOptions(status) {
 
   if (auditState?.unreconciled?.length > 0) {
     const item = auditState.unreconciled[0]
-    const nextPrompt =
-      now === 'NONE' || now === 'IDLE' ? '/carapace reconcile shared findings' : `/carapace run ${now}`
     return {
       stage: 'reconcile',
-      recommendedNextPrompt: nextPrompt,
+      recommendedNextPrompt: '/carapace reconcile shared findings',
       options: [
         {
           id: 'reconcile',
@@ -893,11 +956,9 @@ function buildStageAndOptions(status) {
   if (auditState?.undecided?.length > 0) {
     const item = auditState.undecided[0]
     const totalOpen = item.openCount + item.triggeredCount + item.openReopens.length
-    const nextPrompt =
-      now === 'NONE' || now === 'IDLE' ? `/carapace decide ${item.target}` : `/carapace run ${now}`
     return {
       stage: 'decide',
-      recommendedNextPrompt: nextPrompt,
+      recommendedNextPrompt: `/carapace decide ${item.target}`,
       options: [
         {
           id: 'decide',
@@ -1047,6 +1108,8 @@ function buildStageAndOptions(status) {
 
   const uiTargets = (auditState?.targets ?? []).filter((t) => t.audit === 'ui')
   const nonUiTargets = (auditState?.targets ?? []).filter((t) => t.audit === 'non-ui')
+  const uiNeedsPostFixReaudit = uiTargets.some((t) => t.needsPostFixReaudit)
+  const nonUiNeedsPostFixReaudit = nonUiTargets.some((t) => t.needsPostFixReaudit)
   const uiClean = uiTargets.length > 0 && uiTargets.every((t) => t.isClean)
   const nonUiClean = nonUiTargets.length > 0 && nonUiTargets.every((t) => t.isClean)
   const uiCleanSummary = uiTargets
@@ -1057,33 +1120,45 @@ function buildStageAndOptions(status) {
     .join(', ')
 
   const rawOptions = []
-  if (appProfile?.hasUi && !uiClean) {
+  if (appProfile?.hasUi && uiNeedsPostFixReaudit) {
+    rawOptions.push({
+      id: 'audit-ui',
+      label: `Re-audit screens & UI to verify applied fixes (${uiCleanSummary})`,
+      command: '/carapace audit screens and UI',
+    })
+  } else if (appProfile?.hasUi && !uiClean) {
     rawOptions.push({
       id: 'audit-ui',
       label: 'Audit screens & UI for rushed or inconsistent work',
       command: '/carapace audit screens and UI',
     })
   }
-  if (!nonUiClean) {
+  if (nonUiNeedsPostFixReaudit) {
+    rawOptions.push({
+      id: 'audit-non-ui',
+      label: `Re-audit backend, data & code to verify applied fixes (${nonUiCleanSummary})`,
+      command: '/carapace audit backend, data, and code',
+    })
+  } else if (!nonUiClean) {
     rawOptions.push({
       id: 'audit-non-ui',
       label: 'Audit backend, data & code',
       command: '/carapace audit backend, data, and code',
     })
   }
+  rawOptions.push({
+    id: 'plan',
+    label: `Plan and queue a new task in ${CANONICAL_PLAN_PATH}`,
+    command: '/carapace',
+  })
   for (const item of unorderedRows.slice(0, 2)) {
     const workPreview = item.work ? `: ${item.work.slice(0, 70)}` : ''
     rawOptions.push({
       id: `promote-${item.id.toLowerCase()}`,
-      label: `Promote and run ${item.state} task ${item.id}${workPreview}`,
+      label: `Promote and run ${item.state} task ${item.id} once its trigger fires${workPreview}`,
       command: `/carapace run ${item.id}`,
     })
   }
-  rawOptions.push({
-    id: 'plan',
-    label: `Plan and queue a new task in ${CANONICAL_PLAN_PATH}`,
-    command: '/carapace plan ',
-  })
   if (appProfile?.hasUi && uiClean) {
     rawOptions.push({
       id: 'reaudit-ui',
@@ -1120,6 +1195,27 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   const isSetup = /\b(?:setup|init|initialize|migrate)\b/i.test(text)
   const isVerifyOnly = /\b(?:verify|status|check)\b/i.test(text) && !/\b(?:run|apply|fix|implement|build|add)\b/i.test(text)
   if (isVerifyOnly) return { hasConflict: false, conflicts: [] }
+
+  if (status.gitState?.outerGitRoot && !isSetup) {
+    conflicts.push({
+      kind: 'uninitialized-git-subdirectory',
+      message: `Target directory is not a git repository (.git is missing) and sits inside parent git repository ${status.gitState.outerGitRoot}. Running git or Carapace workflows here without initializing git first will traverse into ${status.gitState.outerGitRoot}.`,
+      options: [
+        {
+          id: 'init-git-first',
+          label: 'Initialize git repository and Carapace in this directory first (Recommended)',
+          recommended: true,
+          command: '/carapace setup',
+        },
+        {
+          id: 'verify-only',
+          label: 'Run read-only status check',
+          recommended: false,
+          command: '/carapace verify',
+        },
+      ],
+    })
+  }
 
   if (status.legacyCanonical && !isSetup) {
     conflicts.push({
@@ -1214,7 +1310,10 @@ export function evaluatePromptConflicts(status, rawPrompt) {
 
   if (status.auditState?.unreconciled?.length > 0) {
     const item = status.auditState.unreconciled[0]
-    const asksDecideOrFix = /\b(?:decide|verdict|apply|fix)\b/i.test(text) && !/\breconcile\b/i.test(text)
+    const asksDecideOrFix =
+      /\b(?:decide|verdict|run|apply|fix|implement|build|execute)\b/i.test(text) &&
+      !/\breconcile\b/i.test(text) &&
+      !/\bproceed\s+with(?:out)?\b/i.test(text)
     if (asksDecideOrFix) {
       conflicts.push({
         kind: 'unreconciled-multi-app-audit',
@@ -1241,7 +1340,9 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     const item = status.auditState.undecided[0]
     const totalOpen = item.openCount + item.triggeredCount + item.openReopens.length
     const asksApplyOrNewAudit =
-      (/\b(?:apply|fix|audit)\b/i.test(text) && !/\b(?:decide|verdict)\b/i.test(text))
+      /\b(?:run|apply|fix|implement|build|execute|audit)\b/i.test(text) &&
+      !/\b(?:decide|verdict)\b/i.test(text) &&
+      !/\bproceed\s+with(?:out)?\b/i.test(text)
     if (asksApplyOrNewAudit) {
       conflicts.push({
         kind: 'undecided-audit-findings',
@@ -1262,6 +1363,42 @@ export function evaluatePromptConflicts(status, rawPrompt) {
         ],
       })
     }
+  } else if (
+    /\b(?:decide|verdicts?)\b/i.test(text) &&
+    !(status.auditState?.unreconciled?.length > 0)
+  ) {
+    const fallbackOptions =
+      status.options?.length > 0
+        ? status.options
+        : [
+            {
+              id: 'audit',
+              label: 'Run an audit first (Recommended)',
+              recommended: true,
+              command: '/carapace audit',
+            },
+          ]
+    conflicts.push({
+      kind: 'no-undecided-findings',
+      message: 'No open audit findings or reopen proposals are awaiting verdicts in docs/audit/.',
+      options: fallbackOptions,
+    })
+  }
+
+  const isBareRun = /^(?:\/carapace(?::carapace)?\s+)?run$/i.test(text)
+  if (
+    isBareRun &&
+    status.initialized &&
+    (status.now === 'IDLE' || status.now === 'NONE') &&
+    !(status.auditState?.undecided?.length > 0) &&
+    !(status.auditState?.unreconciled?.length > 0) &&
+    !(status.auditState?.unappliedAccepted?.length > 0)
+  ) {
+    conflicts.push({
+      kind: 'no-active-now-task',
+      message: `NOW is currently ${status.now} in ${CANONICAL_PLAN_PATH}; there is no active NOW task to execute until an OPEN/DEFERRED item is promoted or a new task is planned.`,
+      options: status.options ?? [],
+    })
   }
 
   const asksParallel = /\b(?:parallel|fan-?out|batch|worktrees?)\b/i.test(text)

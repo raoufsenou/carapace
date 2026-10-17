@@ -382,9 +382,11 @@ test('inspects interrupted steps, canonical app-slop-audit records, zero-finding
 
   // Remove admin so web is a single-app audit; verify undecided -> accepted -> closed -> zero-finding v2
   rmSync(join(root, 'docs/audit/ui/admin'), { recursive: true, force: true })
-  const undecided = readCarapaceStatus({ root })
+  const undecided = readCarapaceStatus({ root, prompt: 'run' })
   assert.equal(undecided.stage, 'decide')
   assert.equal(undecided.nextPrompt, '/carapace decide web')
+  assert.equal(undecided.preflight.hasConflict, true)
+  assert.equal(undecided.preflight.conflicts[0].kind, 'undecided-audit-findings')
 
   write(
     root,
@@ -408,7 +410,7 @@ test('inspects interrupted steps, canonical app-slop-audit records, zero-finding
   const partialFix = readCarapaceStatus({ root })
   assert.equal(partialFix.nextPrompt, '/carapace apply accepted findings for web')
 
-  // Closing A1 in STEP-2 and writing a zero-finding v2.json must NOT loop back to recommending UI audit as Option 1
+  // Closing A1 in STEP-2 on v1 (which raised findings) triggers needsPostFixReaudit until v2 verifies the fixes hold
   write(
     root,
     'docs/audit/ui/web/fixes/STEP-2.json',
@@ -424,6 +426,13 @@ test('inspects interrupted steps, canonical app-slop-audit records, zero-finding
       ],
     }),
   )
+  const needsReaudit = readCarapaceStatus({ root })
+  assert.equal(needsReaudit.auditState.targets[0].needsPostFixReaudit, true)
+  assert.equal(needsReaudit.auditState.targets[0].isClean, false)
+  assert.equal(needsReaudit.options[0].id, 'audit-ui')
+  assert.match(needsReaudit.options[0].label, /Re-audit screens & UI to verify applied fixes/)
+
+  // Writing a zero-finding v2.json marks UI clean and advances to non-UI audit (never promoting DEFERRED as #1 when clean)
   write(
     root,
     'docs/audit/ui/web/v2.json',
@@ -439,9 +448,32 @@ test('inspects interrupted steps, canonical app-slop-audit records, zero-finding
   const cleanUi = readCarapaceStatus({ root })
   assert.equal(cleanUi.stage, 'idle')
   assert.equal(cleanUi.auditState.targets[0].isClean, true)
+  assert.equal(cleanUi.auditState.targets[0].needsPostFixReaudit, false)
   assert.equal(cleanUi.auditState.targets[0].doneCount, 1)
   assert.equal(cleanUi.options[0].id, 'audit-non-ui')
   assert.equal(cleanUi.nextPrompt, '/carapace audit backend, data, and code')
   assert.ok(cleanUi.options.some((o) => o.id === 'promote-audit-dependency-security'))
   assert.ok(cleanUi.options.some((o) => o.id === 'reaudit-ui'))
+
+  // Asking to decide when 0 findings are undecided or to run when NOW is IDLE without accepted findings triggers preflight conflicts
+  const decideWhenClean = readCarapaceStatus({ root, prompt: 'decide web' })
+  assert.equal(decideWhenClean.preflight.hasConflict, true)
+  assert.equal(decideWhenClean.preflight.conflicts[0].kind, 'no-undecided-findings')
+
+  const runWhenIdle = readCarapaceStatus({ root, prompt: 'run' })
+  assert.equal(runWhenIdle.preflight.hasConflict, true)
+  assert.equal(runWhenIdle.preflight.conflicts[0].kind, 'no-active-now-task')
+
+  // Uninitialized subdirectory inside an outer git repository triggers outerGitRoot detection and preflight conflict
+  spawnSync('git', ['init', '-b', 'main'], { cwd: root, encoding: 'utf8' })
+  const nestedSubdir = join(root, 'nested-project')
+  mkdirSync(nestedSubdir, { recursive: true })
+  write(nestedSubdir, 'apps/checkout/checkout.mjs', 'export const x = 1\n')
+  write(nestedSubdir, 'apps/merchant/payout.mjs', 'export const y = 2\n')
+  const nestedStatus = readCarapaceStatus({ root: nestedSubdir, prompt: 'audit' })
+  assert.equal(nestedStatus.appProfile.hasUi, false)
+  assert.equal(nestedStatus.gitState.isGitRepo, false)
+  assert.ok(nestedStatus.gitState.outerGitRoot)
+  assert.equal(nestedStatus.preflight.hasConflict, true)
+  assert.equal(nestedStatus.preflight.conflicts[0].kind, 'uninitialized-git-subdirectory')
 })
