@@ -97,6 +97,18 @@ for (const surface of ['terminal', 'desktop'] as const) {
       if (e.path.endsWith('docs/execution-plan.md')) {
         return { value: canonicalMd } as never
       }
+      if (e.path.endsWith('docs/audit/ui/web/v2.json')) {
+        return {
+          value: JSON.stringify({
+            date: '2026-10-16',
+            commit: '2222222',
+            scope: 'Re-audit',
+            report: 'docs/audit/ui/web/reports/v2/review.html',
+            rechecked: [{ finding: 'A1', outcome: 'holds', observed: 'Holds' }],
+            raised: [],
+          }),
+        } as never
+      }
       throw new Error(`ENOENT: ${e.path}`)
     })
     on('tool.call', { tool: 'Edit' }, async () => ({ result: 'edited' }) as never)
@@ -121,7 +133,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // Transition step 24 to DONE and form a Batch over step 25.
     canonicalMd = `<!-- execution-role: canonical -->
 <!-- execution-register:start -->
-- \`NOW\`: \`UI-APPLY-BATCH-1\`
+\`NOW\`: \`UI-APPLY-BATCH-1\`
 
 | Order | ID | Kind | State | Work and completion boundary | Source or evidence |
 | --- | --- | --- | --- | --- | --- |
@@ -168,9 +180,20 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await panelDone.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace')
     await panelDone.unmount()
 
-    // Writing a new audit version while the register is NONE suggests deciding verdicts for that target.
+    // Writing a new audit version while the register is NONE suggests deciding verdicts for that target,
+    // and a subsequent Bash check command does not clobber that pending decide suggestion.
     await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v1.json' } as never)
     expect(suggested.at(-1)).toBe('/carapace decide web')
+    await $.tool.call({ tool: 'Bash', command: 'node check-records.mjs docs/audit/ui' } as never)
+    expect(suggested.at(-1)).toBe('/carapace decide web')
+
+    // Writing a zero-finding re-audit (v2.json with raised: [] and all rechecked holding) does not falsely suggest decide.
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v1-verdicts.json' } as never)
+    expect(suggested.at(-1)).toBe('/carapace')
+    const countBeforeCleanAudit = suggested.length
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v2.json' } as never)
+    expect(suggested.length).toBe(countBeforeCleanAudit)
+    expect(suggested.at(-1)).toBe('/carapace')
 
     const bar3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     if (surface === 'terminal') {

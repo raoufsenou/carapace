@@ -19,7 +19,7 @@ const STEP_TOOL = 'mcp__carapace__step'
 // and they skip it even with the tool listed; the same request in the brief is followed.
 const STEP_BRIEF = `
 
-Progress reporting: before any other work, call \`${STEP_TOOL}\` with \`total\` (your assigned step count in a batch, or 3-8 steps for a single task) and \`done: 0\`; call it again with \`done\` and a few-word \`note\` (such as the step ID) as each step finishes. It only draws a progress bar.`
+Progress reporting: before any other work, call \`${STEP_TOOL}\` (the MCP tool \`mcp__carapace__step\`, never \`mcp__carapace__progress\`) with \`total\` (your assigned step count in a batch, or 3-8 steps for a single task) and \`done: 0\`; call \`${STEP_TOOL}\` again with \`done\` and a few-word \`note\` (such as the step ID) as each step finishes. It only draws a progress bar.`
 const REGISTER_CONFIG = '.execution-plan-integrity.json'
 const REGISTER_START = '<!-- execution-register:start -->'
 const REGISTER_END = '<!-- execution-register:end -->'
@@ -446,7 +446,7 @@ const parseRegister = (md: string): RegisterSync | null => {
   const end = md.indexOf(REGISTER_END)
   if (start === -1 || end === -1 || end <= start) return null
   const block = md.slice(start + REGISTER_START.length, end)
-  const nowMatch = /^\s*(?:-\s*)?`NOW`\s*:\s*`([^`\n]+)`/m.exec(block)
+  const nowMatch = /^`NOW`\s*:\s*`([^`\n]+)`\s*$/m.exec(block)
   if (!nowMatch?.[1]) return null
   const nowId = nowMatch[1].trim()
 
@@ -896,24 +896,75 @@ async function suggestNext($: EngineInterface, text: string | undefined): Promis
   await $.prompt.suggest({ text }).catch(() => null)
 }
 
+async function hasOpenAuditFindings($: EngineInterface, filePath: string): Promise<boolean> {
+  try {
+    const raw = await $.fs.read(filePath)
+    const parsed = JSON.parse(raw) as {
+      raised?: unknown[]
+      findings?: unknown[]
+      reopens?: unknown[]
+      rechecked?: { outcome?: string }[]
+    }
+    if (!parsed || typeof parsed !== 'object') return true
+    const hasAuditArrays =
+      Array.isArray(parsed.raised) ||
+      Array.isArray(parsed.findings) ||
+      Array.isArray(parsed.reopens) ||
+      Array.isArray(parsed.rechecked)
+    if (!hasAuditArrays) return true
+    const raisedCount = Array.isArray(parsed.raised)
+      ? parsed.raised.length
+      : Array.isArray(parsed.findings)
+        ? parsed.findings.length
+        : 0
+    const reopensCount = Array.isArray(parsed.reopens) ? parsed.reopens.length : 0
+    const failedRechecks = Array.isArray(parsed.rechecked)
+      ? parsed.rechecked.filter(r => r && r.outcome !== 'holds').length
+      : 0
+    return raisedCount + reopensCount + failedRechecks > 0
+  } catch {
+    return true
+  }
+}
+
 async function syncRegister($: EngineInterface, editedFile?: string): Promise<void> {
   try {
     const rawCfg = await $.fs.read(REGISTER_CONFIG)
     const cfg = JSON.parse(rawCfg) as { canonical?: unknown }
     if (typeof cfg.canonical !== 'string' || !cfg.canonical.trim()) return
-    const canonicalPath = cfg.canonical.trim()
+    const canonicalPath = cfg.canonical.trim().replace(/^\.\//, '')
     const md = await $.fs.read(canonicalPath)
     const parsed = parseRegister(md)
     if (!parsed) return
-    const auditVersionEdit = /docs\/audit\/(?:ui|non-ui)\/([^/]+)\/v\d+\.json$/.exec(editedFile ?? '')
-    if (auditVersionEdit?.[1] && parsed.nextPrompt === '/carapace') {
-      parsed.nextPrompt = `/carapace decide ${auditVersionEdit[1]}`
+    if (canonicalPath !== 'docs/execution-plan.md') {
+      parsed.nextPrompt = '/carapace setup'
     }
+    const prevPanel = await read($, panel)
+    const auditVersionEdit = /docs\/audit\/(?:ui|non-ui)\/([^/]+)\/v\d+\.json$/.exec(editedFile ?? '')
+    const auditVerdictsEdit = /docs\/audit\/(?:ui|non-ui)\/([^/]+)\/v\d+-verdicts\.json$/.exec(editedFile ?? '')
+    let hasOpenFindings = false
+    if (auditVersionEdit?.[1] && parsed.nextPrompt === '/carapace' && editedFile) {
+      hasOpenFindings = await hasOpenAuditFindings($, editedFile)
+      if (hasOpenFindings) {
+        parsed.nextPrompt = `/carapace decide ${auditVersionEdit[1]}`
+      }
+    } else if (
+      !editedFile &&
+      !auditVerdictsEdit &&
+      prevPanel.registerPrompt?.startsWith('/carapace decide ') &&
+      parsed.nextPrompt === '/carapace'
+    ) {
+      parsed.nextPrompt = prevPanel.registerPrompt
+    }
+    const promptChanged = prevPanel.registerPrompt !== parsed.nextPrompt
     await update($, panel, prev => ({ ...prev, registerPrompt: parsed.nextPrompt }))
     const editedCanonical =
       typeof editedFile === 'string' &&
       editedFile.length > 0 &&
-      (editedFile.endsWith(canonicalPath) || editedFile.endsWith(REGISTER_CONFIG) || Boolean(auditVersionEdit))
+      (editedFile.endsWith(canonicalPath) ||
+        editedFile.endsWith(REGISTER_CONFIG) ||
+        Boolean(auditVerdictsEdit) ||
+        (Boolean(auditVersionEdit) && hasOpenFindings))
     const current = await read($, flow)
     if (current && !current.isFinished) {
       if (parsed.finished) {
@@ -931,18 +982,20 @@ async function syncRegister($: EngineInterface, editedFile?: string): Promise<vo
         await suggestNext($, next?.nextPrompt ?? parsed.nextPrompt)
       } else if (editedCanonical || !current.nextPrompt) {
         await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
-        await suggestNext($, parsed.nextPrompt)
+        if (editedCanonical || promptChanged) await suggestNext($, parsed.nextPrompt)
       }
       return
     }
     if (current && current.isFinished) {
       if (editedCanonical || !current.nextPrompt) {
         await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
-        await suggestNext($, parsed.nextPrompt)
+        if (editedCanonical || promptChanged) await suggestNext($, parsed.nextPrompt)
       }
       return
     }
-    await suggestNext($, parsed.nextPrompt)
+    if (editedCanonical || promptChanged) {
+      await suggestNext($, parsed.nextPrompt)
+    }
   } catch {
     // No .execution-plan-integrity.json or canonical register in this repo.
   }
@@ -975,7 +1028,7 @@ export const register: Register = (on, options) => {
         'Report /carapace progress to the progress bar above the prompt and the agents panel. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
         'when switching phase or re-planning (tasks), and once at the end with finished: true (and optional nextPrompt). Fields left out keep their previous value. ' +
-        'For the main session only: a call from a subagent is ignored (workers report with `step`).',
+        'For the main session only: a call from a subagent is ignored (workers report with `mcp__carapace__step`).',
       inputSchema: {
         type: 'object',
         properties: {
