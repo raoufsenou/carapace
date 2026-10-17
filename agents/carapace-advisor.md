@@ -29,7 +29,7 @@ Users often do not know every file path, register invariant, interrupted proof s
      - `fanoutAnalysis` (`parallel-ready`, `hybrid`, `sequential`, `already-batch`, `idle`)
      - `options` (numbered options tailored to the current state, with `recommended: true` on option 1)
      - `preflight` (`hasConflict` and `conflicts` with safe resolution options when the user's request collides with ongoing state)
-2. Read `AGENTS.md` / `CLAUDE.md`, `docs/execution-plan.md`, and any referenced `docs/audit/<audit>/<app>/config.json` or `v<N>-verdicts.json` files only as needed to extract exact file paths (`owned-path` lists) for upcoming `NOW`/`QUEUED` steps.
+2. Read `AGENTS.md` / `CLAUDE.md`, `docs/execution-plan.md`, and any referenced `docs/audit/<audit>/<app>/config.json` or `v<N>-verdicts.json` files only as needed to extract exact file paths (`owned-path` lists) for upcoming `NOW`/`QUEUED` steps. (If `Glob` or `Grep` is disabled or unavailable in the current harness, rely directly on `status.mjs --json` output and `Read` rather than retrying disabled search tools.)
 
 ### 2. Determine Lifecycle Stage & Analyze Fan-Out Feasibility
 
