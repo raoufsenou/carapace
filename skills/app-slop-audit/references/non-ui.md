@@ -15,11 +15,14 @@ see on a screen belongs to the [UI audit](ui.md), wherever its cause lies.
 - Serve copies of real data at real size, never the originals. Point every paid or external service at an
   address that refuses connections, such as `http://127.0.0.1:9`, so no call can spend money or send
   anything.
-- Measure with scripts in the report folder's `capture/`, numbered in the order they run, calling the app
-  the way its clients do, and write the measurements each finding cites (rows returned, queries run,
-  durations, sizes) to `facts.jsonl`, from which each card takes the numbers it needs; [report.md](report.md)
-  gives the folder's layout and its names. No browser and no screenshot: a non-UI finding's evidence is the
-  code and the measurements.
+- Measure with scripts in the report folder's `capture/`, numbered in the order they run (prefer a single
+  consolidated `01-capture.mjs` script when probing in-process modules or routes rather than splitting into
+  many small files, and keep input sweeps fast — a few thousand representative boundary and cent cases, never
+  multi-million-iteration brute-force loops), calling the app the way its clients do, and write the
+  measurements each finding cites (rows returned, queries run, durations, sizes) to `facts.jsonl`, from which
+  each card takes the numbers it needs; [report.md](report.md) gives the folder's layout and its names. No
+  browser and no screenshot (neither during capture nor to inspect `review.html`): a non-UI finding's evidence
+  is the code and the measurements, and `check-records.mjs --report` verifies the HTML report statically.
 - Load the toolkit the config names, and prefer the project's own committed measuring tools where they
   exist. A measurement that will become a proof belongs in the project, not in the report's folder.
 - Write every command in the report's capture appendix, so the next version can repeat the capture.

@@ -17,8 +17,9 @@ naming its findings and to what it links.
 ## Start from the template
 
 - Copy `review.html`, `report.css`, and `report.js` from this skill's `assets/report/` into the version's
-  report folder. `report.css` and `report.js` stay unchanged, and the checker compares them with the skill's;
-  what one report needs beyond them goes in its own `<style>`.
+  report folder via `cp`. Never read `report.css` or `report.js` into context: `report.css` and `report.js`
+  stay unchanged, and the checker compares them byte-for-byte with the skill's; what one report needs beyond
+  them goes in its own `<style>`.
 - Every `⟪…⟫` in `review.html` is something to write, in the words it describes. The checker refuses a report
   that still holds one. Keep the skeleton's classes, which the checker reads, and delete what does not apply.
 - In the UI audit, copy the app's built stylesheet, and the fonts and images it loads, into the report's
@@ -241,10 +242,13 @@ After a reconcile, each app's report holds only what is the app's own:
 
 ## Before handing it over
 
-- Open the page with `?all` at the end of its address, so every drawing loads at once, in a window 1440 px
-  wide. Look at every card: each screenshot loads, each screenshot and drawing can be read at the size it is
-  shown, each drawing's frame is `data-ready` and none has `data-overflow`, and old and new compare at one
-  scale. Screenshots of the page go in the system's temporary folder, and are deleted after.
+- **In the UI audit (or when the report contains screenshots or `<template class="draw">` drawings)**: open
+  the page with `?all` at the end of its address, so every drawing loads at once, in a window 1440 px wide.
+  Look at every card: each screenshot loads, each screenshot and drawing can be read at the size it is shown,
+  each drawing's frame is `data-ready` and none has `data-overflow`, and old and new compare at one scale.
+  Screenshots of the page go in the system's temporary folder, and are deleted after. **In a non-UI audit**
+  (which has no screenshots or drawings), **never** open a browser or take screenshots of `review.html`:
+  `check-records.mjs --report` is the complete verification.
 - Run the checker with `--report`. Every new finding has its card, every re-checked finding is named, every
   withdrawn finding is named and has no card, and every image, link, and stylesheet resolves. For a report at
   `reports/vN/review.html` it also checks each new finding's card (its severity, its kind, why, a current
