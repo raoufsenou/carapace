@@ -363,5 +363,149 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await barNextJob.find({ key: 'carapace-agents' })).toBeUndefined()
     await barNextJob.unmount()
   })
+
+  test(`${surface}: preserves planned tasks and prior workers across background subagent wake-up turns`, async ($, on) => {
+    mock.clock(on)
+    on('ui.open', () => ({ value: { isPlaced: true } }))
+    on('agent.spawn', async (_$, e) => ({ agentId: `id-${e.tool_use_id}`, model: 'claude-sonnet-5-5' }) as never)
+    on('turn.complete', () => ({ text: '' }) as never)
+    on('turn.step', async function* (_$, e) {
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: null } as never
+    })
+
+    // Turn 1: orchestrator declares a 3-task hybrid pipeline and spawns Task 1 in the background, then ends Turn 1.
+    for await (const _ of ($.turn.step as (e: unknown) => AsyncIterable<unknown>)({
+      turnId: 'turn-1',
+      index: 0,
+      model: 'claude-sonnet-5-5',
+      messageCount: 1,
+    })) {
+      void _
+    }
+    await $.tool.call({
+      tool: 'mcp__carapace__progress',
+      title: 'Apply v1 audit fixes (A1, B1, C1)',
+      phase: 'run',
+      total: 3,
+      done: 0,
+      tasks: [
+        { title: 'C1: Tokenize hardcoded color palette', tier: 'careful', note: 'src/index.css' },
+        { title: 'A1: Remove 3 KPI tiles and duplicate search input', tier: 'medium', note: 'src/App.tsx' },
+        { title: 'B1: Remove decorative filter chip row', tier: 'medium', note: 'src/App.tsx' },
+      ],
+    } as never)
+    await $.agent.spawn({
+      tool_use_id: 'c1',
+      subagentType: 'carapace-careful',
+      description: 'C1: Tokenize hardcoded color palette',
+      prompt: 'Fix C1.',
+    } as never)
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'waiting on C1' })
+
+    // Background worker C1 finishes while main turn is inactive.
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ agentId: 'id-c1', reason: 'answer', answer: 'c1 done' })
+
+    // Turn 2: <agent-message> wakes up the orchestrator to review C1 and launch A1 + B1 in parallel.
+    for await (const _ of ($.turn.step as (e: unknown) => AsyncIterable<unknown>)({
+      turnId: 'turn-2-wakeup',
+      index: 0,
+      model: 'claude-sonnet-5-5',
+      messageCount: 3,
+    })) {
+      void _
+    }
+    await $.tool.call({
+      tool: 'mcp__carapace__progress',
+      title: 'Apply v1 audit fixes (A1, B1, C1)',
+      phase: 'review',
+      total: 3,
+      done: 1,
+    } as never)
+
+    // Both C1 (finished) and A1/B1 (planned) must still be present in the Agents pane!
+    const panelMid = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await panelMid.find({ key: 'done' }))?.props.label).toContain('Finished · 1')
+    expect(await panelMid.find({ text: /Planned · 2/ })).toBeDefined()
+    await panelMid.unmount()
+
+    // Orchestrator spawns A1 and B1 in background and finishes Turn 2.
+    await $.agent.spawn({
+      tool_use_id: 'a1',
+      subagentType: 'carapace-medium',
+      description: 'A1: Remove 3 KPI tiles and duplicate search input',
+      prompt: 'Fix A1.',
+    } as never)
+    await $.agent.spawn({
+      tool_use_id: 'b1',
+      subagentType: 'carapace-medium',
+      description: 'B1: Remove decorative filter chip row',
+      prompt: 'Fix B1.',
+    } as never)
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'waiting on A1 and B1' })
+
+    // A1 finishes first; Turn 3 wakes up to review/merge A1 while B1 is still running.
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ agentId: 'id-a1', reason: 'answer', answer: 'a1 done' })
+    for await (const _ of ($.turn.step as (e: unknown) => AsyncIterable<unknown>)({
+      turnId: 'turn-3-merge-a1',
+      index: 0,
+      model: 'claude-sonnet-5-5',
+      messageCount: 5,
+    })) {
+      void _
+    }
+    await $.tool.call({
+      tool: 'mcp__carapace__progress',
+      done: 2,
+      phase: 'delegate',
+    } as never)
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'merged A1, waiting on B1' })
+
+    // B1 (the last worker) finishes while main turn is inactive, and Turn 4 wakes up to review/merge B1.
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ agentId: 'id-b1', reason: 'answer', answer: 'b1 done' })
+    for await (const _ of ($.turn.step as (e: unknown) => AsyncIterable<unknown>)({
+      turnId: 'turn-4-final-review',
+      index: 0,
+      model: 'claude-sonnet-5-5',
+      messageCount: 7,
+    })) {
+      void _
+    }
+
+    // All 3 workers (C1, A1, B1) must remain in the Agents pane during Turn 4's review/merge!
+    const panelFinalReview = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await panelFinalReview.find({ key: 'done' }))?.props.label).toContain('Finished · 3')
+    await panelFinalReview.unmount()
+  })
+
+  test(`${surface}: suppresses AbovePrompt bar for zero-task status checks and re-suggests nextPrompt on turn.complete`, async ($, on) => {
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      if (e.text) suggested.push(e.text)
+      return { isShown: true }
+    })
+    on('turn.complete', () => ({ text: '' }) as never)
+    on('ui.render', { component: 'AbovePrompt' }, (_$, e) => {
+      const { Box } = _$.ui.resolve(e)
+      return Box({})
+    })
+
+    await $.tool.call({
+      tool: 'mcp__carapace__progress',
+      title: 'Carapace Status',
+      phase: 'plan',
+      total: 0,
+      done: 0,
+      finished: true,
+      nextPrompt: '/carapace setup',
+    } as never)
+
+    const barZero = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    expect(await barZero.find({ key: 'carapace-agents' })).toBeUndefined()
+    await barZero.unmount()
+
+    suggested.length = 0
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'status reported' })
+    expect(suggested).toEqual(['/carapace setup'])
+  })
 }
 

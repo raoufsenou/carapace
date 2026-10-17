@@ -483,7 +483,7 @@ const parseRegister = (md: string): RegisterSync | null => {
   }
   if (nowId === 'IDLE') {
     return {
-      finished: false,
+      finished: total > 0 && done === total,
       nextPrompt: '/carapace',
     }
   }
@@ -522,6 +522,14 @@ const plannedOf = (f: Flow | null, list: AgentRun[]): Planned[] => {
   if (!f || f.isFinished) return []
   const started = new Set(list.map(a => norm(a.description)))
   return (f.tasks ?? []).map((t, i) => ({ ...t, n: i + 1 })).filter(t => !started.has(norm(t.title)))
+}
+
+const hasPendingFlowWork = (f: Flow | null, list: AgentRun[]): boolean => {
+  if (!f || f.isFinished) return false
+  const workers = workersOf(list)
+  const hasUnspawned = (f.total > 0 && workers.length < f.total) || plannedOf(f, list).length > 0
+  const hasUnaccepted = f.total > 0 && f.done > 0 && f.done < f.total
+  return hasUnspawned || hasUnaccepted
 }
 
 const totals = (list: AgentRun[], at: number) => {
@@ -997,18 +1005,22 @@ async function syncRegister($: EngineInterface, editedFile?: string): Promise<vo
       await suggestNext($, parsed.nextPrompt)
     }
   } catch {
-    // No .execution-plan-integrity.json or canonical register in this repo.
+    if (editedFile === '__status_check__') {
+      const prevPanel = await read($, panel)
+      const fallbackPrompt = prevPanel.registerPrompt || '/carapace setup'
+      if (!prevPanel.registerPrompt) {
+        await update($, panel, prev => ({ ...prev, registerPrompt: fallbackPrompt }))
+      }
+      await suggestNext($, fallbackPrompt)
+    }
   }
 }
 
 async function pruneCompletedRoundIfIdle($: EngineInterface): Promise<void> {
   const [list, curFlow, p] = await Promise.all([read($, agents), read($, flow), read($, panel)])
   if (!list.length || list.some(a => a.status === 'running')) return
-  const workers = workersOf(list)
-  const doneWorkers = workers.filter(a => a.status === 'done').length
   const isActivePlannedFlow =
-    Boolean(curFlow && !curFlow.isFinished && curFlow.total > 0 && !p.isRoundDone) &&
-    (doneWorkers < curFlow.total || plannedOf(curFlow, list).length > 0)
+    Boolean(curFlow && !curFlow.isFinished && !p.isRoundDone) && hasPendingFlowWork(curFlow, list)
   if (isActivePlannedFlow) return
 
   await update($, agents, l => l.filter(a => a.status === 'running'))
@@ -1114,6 +1126,7 @@ export const register: Register = (on, options) => {
     const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
     if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
     if (next?.nextPrompt && (input.nextPrompt !== undefined || next.isFinished)) {
+      await update($, panel, p => ({ ...p, registerPrompt: next.nextPrompt }))
       await suggestNext($, next.nextPrompt)
     }
     return { result: `ok: ${label(next ?? blank())}` }
@@ -1128,7 +1141,9 @@ export const register: Register = (on, options) => {
       }
       const res = await next(e)
       const filePath = typeof (e as { file_path?: unknown }).file_path === 'string' ? String((e as { file_path?: unknown }).file_path) : undefined
-      if (!e.agentId) await syncRegister($, filePath)
+      const cmd = typeof (e as { command?: unknown }).command === 'string' ? String((e as { command?: unknown }).command) : ''
+      const syncHint = filePath ?? (cmd.includes('status.mjs') ? '__status_check__' : undefined)
+      if (!e.agentId) await syncRegister($, syncHint)
       return res
     })
   }
@@ -1154,9 +1169,17 @@ export const register: Register = (on, options) => {
   // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     await pruneCompletedRoundIfIdle($)
+    const resumeId = typeof (e as { resume?: unknown }).resume === 'string' ? String((e as { resume?: unknown }).resume).trim() : ''
+    if (resumeId) {
+      await update($, agents, list =>
+        list.map((a): AgentRun => (a.agentId === resumeId || a.id === resumeId ? { ...a, status: 'running', endedAt: undefined } : a)),
+      )
+      await update($, panel, prev => ({ ...prev, isRoundDone: false }))
+      await update($, flow, prev => (prev ? { ...prev, isFinished: false, phase: prev.phase === 'close' ? 'delegate' : prev.phase } : prev))
+    }
     const type = String(e.subagent_type ?? '')
     const cur = await read($, flow)
-    if (isScout(type) || (!isCarapace(type) && (!cur || cur.isFinished))) return next(e)
+    if (isScout(type) || (!isCarapace(type) && !resumeId && (!cur || cur.isFinished))) return next(e)
 
     await update($, flow, prev => {
       const base = prev && !prev.isFinished ? { ...blank(), ...prev } : blank()
@@ -1218,10 +1241,8 @@ export const register: Register = (on, options) => {
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId) {
       const [p, f, list] = await Promise.all([read($, panel), read($, flow), read($, agents)])
-      const isNewTurn =
-        Boolean(p.isRoundDone) ||
-        Boolean(p.activeTurnId && e.turnId && p.activeTurnId !== e.turnId) ||
-        (e.index === 0 && !p.isMainTurnActive && list.length > 0 && list.every(a => a.status !== 'running'))
+      const pendingFlow = hasPendingFlowWork(f, list)
+      const isNewTurn = !pendingFlow && Boolean(p.isRoundDone)
       if (isNewTurn) {
         await update($, agents, l => l.filter(a => a.status === 'running'))
         if (f && (f.isFinished || (workersOf(list).length > 0 && !list.some(a => a.status === 'running')))) {
@@ -1282,7 +1303,7 @@ export const register: Register = (on, options) => {
     const agentId = e.agentId
     if (agentId) {
       const at = await $.clock.now()
-      const updated = await update($, agents, list =>
+      await update($, agents, list =>
         list.map((a): AgentRun => {
           if (a.agentId !== agentId) return a
           // A run whose steps went unseen still gets the turn's own sum.
@@ -1306,34 +1327,31 @@ export const register: Register = (on, options) => {
         }),
       )
       await update($, now, () => at)
-      const p = await read($, panel)
-      if (!p.isMainTurnActive && updated.length > 0 && !updated.some(a => a.status === 'running')) {
-        await update($, panel, prev => ({ ...prev, isRoundDone: true }))
-        const f = await read($, flow)
-        if (f && !f.isFinished && workersOf(updated).length > 0) {
-          await update($, flow, prev => (prev ? { ...liveFlow(prev, updated), running: 0, phase: 'close', isFinished: true } : prev))
-        }
-      }
-    } else {
-      const [list, f] = await Promise.all([read($, agents), read($, flow)])
-      const hasRunning = list.some(a => a.status === 'running')
-      await update($, panel, prev => ({
-        ...prev,
-        isMainTurnActive: false,
-        ...(list.length > 0 && !hasRunning ? { isRoundDone: true } : {}),
-      }))
-      if (f && !f.isFinished && !hasRunning) {
-        const workers = workersOf(list)
-        const doneWorkers = workers.filter(a => a.status === 'done').length
-        if (workers.length > 0 && (f.total === 0 || doneWorkers >= f.total || plannedOf(f, list).length === 0)) {
-          const total = Math.max(f.total, workers.length)
-          await update($, flow, prev => (prev ? { ...prev, total, done: total, running: 0, phase: 'close', isFinished: true } : prev))
-        } else if (f.total === 0 && workers.length === 0 && f.tasks.length === 0) {
-          await update($, flow, () => null)
-        }
+      return next(e)
+    }
+
+    const [list, f] = await Promise.all([read($, agents), read($, flow)])
+    const hasRunning = list.some(a => a.status === 'running')
+    const pendingFlow = hasPendingFlowWork(f, list)
+    await update($, panel, prev => ({
+      ...prev,
+      isMainTurnActive: false,
+      ...(list.length > 0 && !hasRunning && !pendingFlow ? { isRoundDone: true } : {}),
+    }))
+    if (f && !hasRunning) {
+      const workers = workersOf(list)
+      if (!f.isFinished && workers.length > 0 && !pendingFlow) {
+        const total = Math.max(f.total, workers.length)
+        await update($, flow, prev => (prev ? { ...prev, total, done: total, running: 0, phase: 'close', isFinished: true } : prev))
+      } else if (f.total === 0 && workers.length === 0 && f.tasks.length === 0) {
+        await update($, flow, () => null)
       }
     }
-    return next(e)
+    const done = await next(e)
+    const [latestFlow, latestPanel] = await Promise.all([read($, flow), read($, panel)])
+    const nextCmd = latestFlow?.nextPrompt ?? latestPanel.registerPrompt
+    if (nextCmd) await suggestNext($, nextCmd)
+    return done
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -1533,6 +1551,10 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const rawFlow = await read($, flow)
     if (rawFlow === null || e.props.hasSurvey) return next(e)
+    const list = await read($, agents)
+    if (rawFlow.total === 0 && rawFlow.isFinished && list.length === 0 && rawFlow.tasks.length === 0) {
+      return next(e)
+    }
     // Draw this row with the other mods' bands beneath it. Claude Code's own placeholder ({ type: 'engine' }) is
     // never nested: the desktop drops a band that nests it.
     const drawn = await Promise.resolve(next(e)).catch(() => null)
@@ -1540,7 +1562,6 @@ export const register: Register = (on, options) => {
 
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
-    const list = await read($, agents)
     const f = liveFlow(rawFlow, list)
     const fillRatio = ratio(rawFlow, list)
     const crew = list.length + plannedOf(f, list).length
