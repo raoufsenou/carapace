@@ -2,6 +2,7 @@
 scripts/claude.mjs
 .claude-home/
 artifact/
+artifacts/
 
 # OS & editor artifacts
 .DS_Store

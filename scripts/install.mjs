@@ -422,7 +422,7 @@ function installClaudeHome({ checkout, claudeHome, replace }) {
 
 export function install({
   checkout = CHECKOUT,
-  claudeHome = process.env.CLAUDE_HOME || join(homedir(), '.claude'),
+  claudeHome = process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
   codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'),
   cursorHome = process.env.CURSOR_HOME || join(homedir(), '.cursor'),
   replace = false,
@@ -438,6 +438,7 @@ export function install({
       const localClaudeHome = join(checkout, '.claude-home')
       if (
         !process.env.CLAUDE_HOME &&
+        !process.env.CLAUDE_CONFIG_DIR &&
         existsSync(localClaudeHome) &&
         resolve(localClaudeHome) !== resolve(claudeHome)
       ) {
