@@ -2,7 +2,7 @@
 
 ## One authority
 
-Exactly one plan-like document has role `canonical`. It alone owns current work, ordering, and state.
+Exactly one plan-like document has role `canonical`. Its repository-relative path is `docs/execution-plan.md`, and it alone owns current work, ordering, and state.
 Every other plan-like document has one of these roles:
 
 | Role | Meaning |

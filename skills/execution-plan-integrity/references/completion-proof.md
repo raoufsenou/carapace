@@ -150,8 +150,12 @@ fields already record, such as the edit ledger. A proof reconstructed during mig
 because the migration's snapshot keeps that history. The checker refuses a `closedRow` that is not one
 row naming the task, and `notes` that are not lines of text.
 
-Repository-relative paths in sources, evidence and the implementation ledger must exist. Verification
-commands are evidence records, not commands the checker executes. They may invoke any language or
+Repository-relative paths in sources, evidence and the implementation ledger must exist, unless superseded
+by a later `DONE` or `NOW` task via `"supersededBy": "<LATER-TASK-ID>"` on the earlier proof (or its
+requirement, evidence, or integration entry) or `"supersedes": ["<EARLIER-TASK-ID>"]` on the later proof.
+When a later verified proof's `implementationLedger` modifies a file from an earlier `DONE` proof, symbol
+renames in that file are validated against the later proof rather than failing the historical proof.
+Verification commands are evidence records, not commands the checker executes. They may invoke any language or
 toolchain. The closing agent runs them through the repository's normal gate so failure semantics and
 service preflights remain repository-owned.
 

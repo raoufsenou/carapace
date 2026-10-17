@@ -364,7 +364,16 @@ export function parseExecutionRegisterText(text, source = 'execution plan') {
     }
   }
 
-  return { findings, ordered, unordered, all, pointer, batch }
+  return {
+    findings,
+    ordered,
+    unordered,
+    all,
+    pointer,
+    batch,
+    idleReason: idleReasons[0] ?? null,
+    resumeWhen: resumeConditions[0] ?? null,
+  }
 }
 
 export function checkExecutionRegisterText(text, source = 'execution plan') {

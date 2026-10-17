@@ -15,6 +15,7 @@ import {
 const ROLES = new Set(['evidence', 'validation', 'design', 'archive'])
 const ROLE_MARKER = /execution-role: (canonical|evidence|validation|design|archive)/g
 const DEFAULT_CONFIG = '.execution-plan-integrity.json'
+export const CANONICAL_PLAN_PATH = 'docs/execution-plan.md'
 export const CANONICAL_WORD_LIMIT = 10000
 const LOCAL_IMPLEMENTATION_GLOBS = [
   '**/check-execution-plan.{js,mjs,cjs,ts}',
@@ -54,6 +55,11 @@ export function readExecutionConfig(root, configPath = DEFAULT_CONFIG) {
   }
   if (config?.schema !== 2) throw new Error('Execution-plan config schema must be 2.')
   const canonical = safeRelativePath(config.canonical, 'Canonical path')
+  if (canonical !== CANONICAL_PLAN_PATH) {
+    throw new Error(
+      `Canonical path must be "${CANONICAL_PLAN_PATH}" (found "${canonical}"); migrate legacy plan files into ${CANONICAL_PLAN_PATH}.`,
+    )
+  }
   const requiredGlobs = stringList(config.requiredGlobs, 'requiredGlobs')
   if (!config.completionProofs || typeof config.completionProofs !== 'object' || Array.isArray(config.completionProofs)) {
     throw new Error('completionProofs must be an object.')

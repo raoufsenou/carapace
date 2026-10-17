@@ -18,14 +18,14 @@ export const REQUIRED_ARTIFACT_FILES = ARTIFACT_ENTRIES
 export const ARTIFACT_SHA256 = Object.freeze({
   'SKILL.md': '845028acb839a298978b59f2f7dade20773c2a33bf8f99f47fc8a5a3244a9728',
   'agents/openai.yaml': 'd9322ee1351bdce6770eb1994f18a8bb485fc97abdd0bc56e356acc44c3c93cb',
-  'references/contract.md': 'd07250056d55df8f10997f1ea6feedff4030d5aaa9253eb19ed18088b31ba3d7',
-  'references/migration.md': 'c65261aead6a0073e3f025ceea760af68a5772142dd616e29a2fb1ce97168d7a',
+  'references/contract.md': '4019b39dcce61ee5d6eb59ef3da7eb21a71fc33e4409e8c4b4565ea1ee37f46e',
+  'references/migration.md': '3498814f9e5eb438f0607f85a2a148237f5e136009c86dbc9b48c9c857527947',
   'references/report-template.md': 'ead9b414a89777e9add4cf38b99ea23a24541b8edbf29b657eeb2f8cd10f7d66',
-  'references/completion-proof.md': 'a522c0d2d146cde08e776f7e26a0233be5f5cb36d7094363a576c24ab74e027b',
-  'assets/checker/check-execution-plan.mjs': 'f7e1d3f1bf424ff3a16613981404887a7f685ccbcd5a56a10f9be12ab293998e',
-  'assets/checker/completion-proof.mjs': '34061e9f5ec2f4e622e36e485e9b4bf8b8b2f396f82ceef60428c7ef8e146c9a',
-  'assets/checker/execution-register.mjs': '0fa40c1887c4a07e81fc3b84004a5be4406b0fec1ba7a18a711eeaec74f3d08e',
-  'assets/checker/execution-register.test.mjs': '1cb2854038119d098874058635c2b9ae645577a396d564b47745c5830ac3c8f3',
+  'references/completion-proof.md': 'ca4c2095035c433c9ee257c1f97ec479bb8422dfcaf04bd37a47a70b25147d3a',
+  'assets/checker/check-execution-plan.mjs': '6ff5f0ea38639f62ed272d3d5371c756c9bc55aa5c16f200430212af42ece262',
+  'assets/checker/completion-proof.mjs': 'd0d6e6b2001390d5b83ba34fbe94843a7bacbe43be8b6b8060f56a47c76ab4b9',
+  'assets/checker/execution-register.mjs': 'd02240a65314dda97f57034c8f5e3ac63fc31923b9e5f14ad33d3cc8c860c659',
+  'assets/checker/execution-register.test.mjs': 'c946b33eb87e82d2395f01900d8ce1e597b59c202e10e48d2822beab78eb1557',
 })
 
 export const SKILL_VERIFICATION_PROOFS = Object.freeze([

@@ -28,14 +28,38 @@ function relativePath(value) {
   return path
 }
 
-function repositoryPath(root, value, label, findings) {
+function repositoryPath(root, value, label, findings, { allowMissing = false } = {}) {
   const path = relativePath(value)
   if (!path) {
     findings.push(`${label} must be a repository-relative path`)
     return null
   }
-  if (!existsSync(join(root, path))) findings.push(`${label} does not exist: ${path}`)
+  if (!allowMissing && !existsSync(join(root, path))) findings.push(`${label} does not exist: ${path}`)
   return path
+}
+
+function checkSupersededBy(value, row, context, label) {
+  if (value === undefined) return false
+  if (!nonEmpty(value)) {
+    context.findings.push(`${label} supersededBy must be a non-empty task ID`)
+    return false
+  }
+  const target = context.known.get(value)
+  const targetOrder = context.effectiveOrder(value)
+  const rowOrder = context.effectiveOrder(row.id)
+  const isTargetActiveOrDone =
+    target && (target.state === 'DONE' || target.state === 'NOW' || context.currentMembers.has(value))
+  if (!isTargetActiveOrDone || value === row.id || targetOrder <= rowOrder) {
+    context.findings.push(`${label} supersededBy ${value} must name a later DONE or NOW task`)
+    return false
+  }
+  return true
+}
+
+function isPathTouchedLater(path, row, context) {
+  if (!path || row.state !== 'DONE') return false
+  const latestTouch = context.latestLedgerTouch.get(path)
+  return latestTouch !== undefined && latestTouch > context.effectiveOrder(row.id)
 }
 
 function nonEmpty(value) {
@@ -77,11 +101,14 @@ function checkVerification(value, label, root, findings, defaultDate = '') {
   }
 }
 
-function checkRequirement(requirement, label, root, findings, defaultDate = '') {
+function checkRequirement(requirement, label, row, context, defaultDate = '', proofSuperseded = false) {
+  const { root, findings } = context
   if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) {
     findings.push(`${label} must be an object`)
     return null
   }
+  const reqSuperseded =
+    proofSuperseded || checkSupersededBy(requirement.supersededBy, row, context, label)
   if (!REQUIREMENT_ID.test(requirement.id ?? '')) findings.push(`${label} has invalid requirement ID ${requirement.id ?? '(missing)'}`)
   if (!nonEmpty(requirement.statement)) findings.push(`${label} has no assertion statement`)
   if (!requirement.source || typeof requirement.source !== 'object' || Array.isArray(requirement.source)) {
@@ -94,17 +121,28 @@ function checkRequirement(requirement, label, root, findings, defaultDate = '') 
     findings.push(`${label} has no repository evidence`)
   } else {
     requirement.evidence.forEach((evidence, index) => {
+      const evLabel = `${label} evidence ${index + 1}`
       if (!evidence || typeof evidence !== 'object' || Array.isArray(evidence)) {
-        findings.push(`${label} evidence ${index + 1} must be an object`)
+        findings.push(`${evLabel} must be an object`)
         return
       }
-      const evidencePath = repositoryPath(root, evidence.path, `${label} evidence ${index + 1}`, findings)
+      const evSuperseded =
+        reqSuperseded || checkSupersededBy(evidence.supersededBy, row, context, evLabel)
+      const evidencePath = repositoryPath(root, evidence.path, evLabel, findings, {
+        allowMissing: evSuperseded,
+      })
       if (evidence.symbol !== undefined && !nonEmpty(evidence.symbol)) {
-        findings.push(`${label} evidence ${index + 1} has an empty symbol`)
-      } else if (evidencePath && nonEmpty(evidence.symbol) && existsSync(join(root, evidencePath))) {
+        findings.push(`${evLabel} has an empty symbol`)
+      } else if (
+        !evSuperseded
+        && evidencePath
+        && nonEmpty(evidence.symbol)
+        && existsSync(join(root, evidencePath))
+        && !isPathTouchedLater(evidencePath, row, context)
+      ) {
         const content = readFileSync(join(root, evidencePath), 'utf8')
         if (!content.includes(evidence.symbol.trim())) {
-          findings.push(`${label} evidence ${index + 1} symbol ${evidence.symbol} was not found in ${evidencePath}`)
+          findings.push(`${evLabel} symbol ${evidence.symbol} was not found in ${evidencePath}`)
         }
       }
     })
@@ -158,13 +196,16 @@ function checkDisposition(proof, row, rowsById, root, findings) {
   findings.push(`${label} must be TRACKED or NOT-REQUIRED for ${row.kind}`)
 }
 
-function checkImplementationProof(proof, row, root, findings) {
+function checkImplementationProof(proof, row, context, proofSuperseded = false) {
+  const { root, findings } = context
   if (!Array.isArray(proof.implementationLedger) || proof.implementationLedger.length === 0) {
     findings.push(`${row.id} has no implementation ledger`)
   } else {
     const paths = new Set()
     for (const value of proof.implementationLedger) {
-      const path = repositoryPath(root, value, `${row.id} implementation ledger`, findings)
+      const path = repositoryPath(root, value, `${row.id} implementation ledger`, findings, {
+        allowMissing: proofSuperseded,
+      })
       if (path && paths.has(path)) findings.push(`${row.id} repeats implementation ledger path ${path}`)
       if (path) paths.add(path)
     }
@@ -178,13 +219,23 @@ function checkImplementationProof(proof, row, root, findings) {
         findings.push(`${label} must be an object`)
         return
       }
+      const traceSuperseded =
+        proofSuperseded || checkSupersededBy(trace.supersededBy, row, context, label)
       if (!nonEmpty(trace.entryPoint)) findings.push(`${label} has no entryPoint`)
       if (!nonEmpty(trace.implementation)) findings.push(`${label} has no implementation target`)
       if (!nonEmpty(trace.consumer)) findings.push(`${label} has no consumer or durable effect`)
       if (nonEmpty(trace.implementation)) {
         const [rawPath, symbol] = trace.implementation.split('#')
-        const implPath = repositoryPath(root, rawPath, `${label} implementation`, findings)
-        if (implPath && nonEmpty(symbol) && existsSync(join(root, implPath))) {
+        const implPath = repositoryPath(root, rawPath, `${label} implementation`, findings, {
+          allowMissing: traceSuperseded,
+        })
+        if (
+          !traceSuperseded
+          && implPath
+          && nonEmpty(symbol)
+          && existsSync(join(root, implPath))
+          && !isPathTouchedLater(implPath, row, context)
+        ) {
           const content = readFileSync(join(root, implPath), 'utf8')
           if (!content.includes(symbol.trim())) {
             findings.push(`${label} implementation symbol ${symbol} was not found in ${implPath}`)
@@ -227,8 +278,8 @@ function checkPreservedText(proof, row, proofPath, findings) {
   }
 }
 
-function collectMembers(closing, context, listedBy, members) {
-  const { proofDirectory, rowIds, known, findings } = context
+function collectMembers(closing, context, listedBy, members, step = 1) {
+  const { proofDirectory, rowIds, known, orderById, findings } = context
   const proof = context.readProof(closing.id)
   if (!proof || proof.members === undefined) return
   const proofPath = `${proofDirectory}/${closing.id}.json`
@@ -242,6 +293,8 @@ function collectMembers(closing, context, listedBy, members) {
   }
   const isBatch = closing.kind === 'VALIDATION'
   const listed = []
+  const closingOrder = orderById.get(closing.id) ?? (closing.order ?? 0) * 1000
+  const totalMembers = proof.members.length
   proof.members.forEach((line, index) => {
     const member = parseOrderedRow(line)
     if (!member) {
@@ -261,8 +314,9 @@ function collectMembers(closing, context, listedBy, members) {
     }
     listedBy.set(member.id, closing.id)
     known.set(member.id, member)
+    orderById.set(member.id, closingOrder - (totalMembers - index) * step)
     members.push({ row: member, closing, isBatch })
-    if (!isBatch) collectMembers(member, context, listedBy, members)
+    if (!isBatch) collectMembers(member, context, listedBy, members, step * 0.01)
     else if (context.readProof(member.id)?.members !== undefined) {
       findings.push(`${member.id} is a member of batch ${closing.id} but its proof lists members; a batch cannot hold another`)
     }
@@ -300,12 +354,36 @@ function checkProof(row, context, { missing = null, keepsRow = false } = {}) {
     findings.push(`${proofPath} completedAt ${proof.completedAt ?? '(missing)'} does not match register date ${registerDate}`)
   }
 
+  const proofSuperseded =
+    context.supersededTasks.has(row.id) || checkSupersededBy(proof.supersededBy, row, context, row.id)
+
+  if (proof.supersedes !== undefined) {
+    if (!Array.isArray(proof.supersedes) || proof.supersedes.length === 0) {
+      findings.push(`${proofPath} supersedes must be a non-empty array of earlier task IDs`)
+    } else {
+      const rowOrder = context.effectiveOrder(row.id)
+      for (const earlierId of proof.supersedes) {
+        const earlier = known.get(earlierId)
+        if (!earlier || earlierId === row.id || context.effectiveOrder(earlierId) >= rowOrder) {
+          findings.push(`${proofPath} supersedes ${earlierId ?? '(missing)'} must name an earlier DONE task`)
+        }
+      }
+    }
+  }
+
   if (!Array.isArray(proof.requirements) || proof.requirements.length === 0) {
     findings.push(`${proofPath} has no requirements`)
   } else {
     const requirementIds = new Set()
     proof.requirements.forEach((requirement, index) => {
-      const id = checkRequirement(requirement, `${row.id} requirement ${index + 1}`, root, findings, proof.completedAt ?? '')
+      const id = checkRequirement(
+        requirement,
+        `${row.id} requirement ${index + 1}`,
+        row,
+        context,
+        proof.completedAt ?? '',
+        proofSuperseded,
+      )
       if (id && requirementIds.has(id)) findings.push(`${proofPath} repeats requirement ID ${id}`)
       if (id) requirementIds.add(id)
     })
@@ -326,7 +404,7 @@ function checkProof(row, context, { missing = null, keepsRow = false } = {}) {
   }
 
   checkDisposition(proof, row, known, root, findings)
-  if (IMPLEMENTATION_KINDS.has(row.kind)) checkImplementationProof(proof, row, root, findings)
+  if (IMPLEMENTATION_KINDS.has(row.kind)) checkImplementationProof(proof, row, context, proofSuperseded)
 }
 
 export function checkCompletionProofs({ root, directory, rows, batch = null }) {
@@ -337,12 +415,21 @@ export function checkCompletionProofs({ root, directory, rows, batch = null }) {
   if (!existsSync(absoluteDirectory)) return [`Completion-proof directory does not exist: ${proofDirectory}`]
 
   const proofs = new Map()
+  const currentMembers = new Set(batch?.members ?? [])
+  const orderById = new Map(rows.map((row, index) => [row.id, (row.order ?? index + 1) * 1000]))
   const context = {
     root,
     proofDirectory,
     findings,
     rowIds: new Set(rows.map((row) => row.id)),
     known: new Map(rows.map((row) => [row.id, row])),
+    currentMembers,
+    orderById,
+    latestLedgerTouch: new Map(),
+    supersededTasks: new Set(),
+    effectiveOrder(id) {
+      return orderById.get(id) ?? Infinity
+    },
     readProof(id) {
       const proofPath = `${proofDirectory}/${id}.json`
       if (!proofs.has(proofPath)) {
@@ -352,10 +439,40 @@ export function checkCompletionProofs({ root, directory, rows, batch = null }) {
     },
   }
   const doneRows = rows.filter((row) => row.state === 'DONE')
-  const currentMembers = new Set(batch?.members ?? [])
   const listedBy = new Map()
   const members = []
   for (const row of doneRows) collectMembers(row, context, listedBy, members)
+
+  const activeProofRows = [
+    ...doneRows,
+    ...rows.filter((row) => currentMembers.has(row.id)),
+    ...members.map((entry) => entry.row),
+  ]
+  for (const row of activeProofRows) {
+    const proof = context.readProof(row.id)
+    if (!proof) continue
+    const rowOrder = context.effectiveOrder(row.id)
+    if (Array.isArray(proof.implementationLedger)) {
+      for (const rawPath of proof.implementationLedger) {
+        const rel = relativePath(rawPath)
+        if (!rel) continue
+        const prev = context.latestLedgerTouch.get(rel) ?? -Infinity
+        if (rowOrder > prev) context.latestLedgerTouch.set(rel, rowOrder)
+      }
+    }
+    if (Array.isArray(proof.supersedes)) {
+      for (const earlierId of proof.supersedes) {
+        if (
+          typeof earlierId === 'string'
+          && context.known.has(earlierId)
+          && earlierId !== row.id
+          && context.effectiveOrder(earlierId) < rowOrder
+        ) {
+          context.supersededTasks.add(earlierId)
+        }
+      }
+    }
+  }
 
   const accounted = new Set([...doneRows.map((row) => row.id), ...currentMembers, ...listedBy.keys()])
   for (const filename of globSync('*.json', { cwd: absoluteDirectory })) {

@@ -77,8 +77,7 @@ in the row and stop for a decision.
 
 ## 3. Select the authority
 
-Prefer the document already named by repository instructions. If none exists, propose the smallest
-durable location. Do not create a new tracker while leaving an old tracker authoritative.
+The canonical document lives at `docs/execution-plan.md`. If repository instructions or an existing tracker name another file (such as `PLAN.md` or `docs/FEATURES.md`), migrate its live register to `docs/execution-plan.md`, update repository instructions to point to `docs/execution-plan.md`, and classify any retained historical tracker as `archive`. Do not leave an old tracker authoritative.
 
 The canonical document owns the complete live state. Supporting documents may retain detailed evidence,
 but the register must contain enough scope and acceptance information to identify the task without

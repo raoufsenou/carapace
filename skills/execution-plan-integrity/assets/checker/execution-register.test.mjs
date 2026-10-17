@@ -811,3 +811,83 @@ test('verifies evidence and implementation symbols exist in their files and acce
   assert.deepEqual(checkExecutionProject({ root }), [])
 })
 
+test('enforces docs/execution-plan.md as canonical path and handles historical proof supersession when later steps refactor or delete files', () => {
+  const root = fixture()
+  writeFileSync(
+    join(root, '.execution-plan-integrity.json'),
+    `${JSON.stringify({
+      schema: 2,
+      canonical: 'PLAN.md',
+      completionProofs: { directory: 'docs/execution-proofs' },
+    })}\n`,
+  )
+  assert.ok(
+    checkExecutionProject({ root }).includes(
+      'Canonical path must be "docs/execution-plan.md" (found "PLAN.md"); migrate legacy plan files into docs/execution-plan.md.',
+    ),
+  )
+
+  const root2 = fixture()
+  writeFileSync(
+    join(root2, 'docs/execution-plan.md'),
+    register([
+      '| 1 | `TASK-ONE` | `IMPLEMENTATION` | `DONE` | Initial implementation. | Completed 2026-09-18; closure proof. |',
+      '| 2 | `TASK-TWO` | `IMPLEMENTATION` | `DONE` | Refactor taskOne to taskTwo and delete legacy file. | Completed 2026-09-19; closure proof. |',
+      '| 3 | `TASK-THREE` | `IMPLEMENTATION` | `NOW` | Follow-up work. | Audit finding. |',
+    ], 'TASK-THREE'),
+  )
+  // TASK-TWO refactored src/task-one.mjs so symbol taskOne was renamed to taskTwo, and deleted src/legacy.mjs
+  writeFileSync(join(root2, 'src/task-one.mjs'), 'export const taskTwo = () => true\n')
+  writeProof(
+    root2,
+    'TASK-ONE',
+    completionProof({
+      supersededBy: 'TASK-TWO',
+      implementationLedger: ['src/task-one.mjs', 'src/legacy.mjs', 'test/task-one.test.mjs'],
+    }),
+  )
+  writeProof(
+    root2,
+    'TASK-TWO',
+    completionProof({
+      taskId: 'TASK-TWO',
+      completedAt: '2026-09-19',
+      requirements: [{
+        id: 'REQ-TASK-TWO',
+        statement: 'Refactored taskTwo is exported.',
+        source: { path: 'docs/execution-plan.md', anchor: 'TASK-TWO' },
+        evidence: [{ path: 'src/task-one.mjs', symbol: 'taskTwo' }],
+        verification: [{
+          kind: 'test',
+          command: 'node --test test/task-one.test.mjs',
+          result: 'passed',
+          checkedAt: '2026-09-19',
+        }],
+      }],
+      integration: [{
+        entryPoint: 'taskTwo()',
+        implementation: 'src/task-one.mjs#taskTwo',
+        consumer: 'test/task-one.test.mjs',
+      }],
+    }),
+  )
+  assert.deepEqual(checkExecutionProject({ root: root2 }), [])
+
+  // Without supersededBy on TASK-ONE, symbol refactoring in src/task-one.mjs still passes because TASK-TWO's implementationLedger modified src/task-one.mjs
+  writeProof(root2, 'TASK-ONE', completionProof())
+  assert.deepEqual(checkExecutionProject({ root: root2 }), [])
+
+  // Invalid supersededBy (naming a future QUEUED task that has not started) is rejected
+  writeProof(root2, 'TASK-TWO', completionProof({
+    taskId: 'TASK-TWO',
+    completedAt: '2026-09-19',
+    supersededBy: 'TASK-FOUR',
+  }))
+  assert.ok(
+    checkExecutionProject({ root: root2 }).includes(
+      'TASK-TWO supersededBy TASK-FOUR must name a later DONE or NOW task',
+    ),
+  )
+})
+
+
