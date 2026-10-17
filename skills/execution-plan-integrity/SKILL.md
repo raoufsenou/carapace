@@ -105,8 +105,9 @@ of its apply state machine.
 4. Rewrite current-ordering language outside the register as dated historical evidence or remove only
    the authority claim, never the underlying record.
 5. Add the standard root `.execution-plan-integrity.json` config and completion-proof directory. Invoke the
-   skill-owned v2 checker and mutation suite directly; add no checker implementation or mutation test to
-   the repository.
+   skill-owned v2 checker (`check-execution-plan.mjs --root <repo>`) directly; add no checker implementation
+   or mutation test to the repository, and do not read the checker's `.mjs` source or run `execution-register.test.mjs`
+   during normal target-repository migrations.
 6. Remove a repository-local copy of this skill's checker or mutation suite when the maintainer authorizes
    consolidation; preserve only target-specific configuration and evidence.
 7. Add a repository instruction that agents begin with the stable `NOW` ID, never create a second live
@@ -140,7 +141,7 @@ documentation, design, decision, migration and validation tasks.
    tracked by stable task IDs, or explicitly not required by a recorded decision. These task kinds never
    imply implementation by themselves.
 7. Write the machine-readable closure proof, preserving the task's full row and its working notes in it
-   verbatim, run the proof checker and its mutation tests, then run the narrow relevant repository checks.
+   verbatim, run the proof checker (`check-execution-plan.mjs --root <repo>`), then run the narrow relevant repository checks.
    The proof must report zero unverified acceptance items.
 8. Only after all proofs pass, update the task to `DONE` and advance the pointer in the same pass. Select
    another task only when it is already authorized and ordered; use `IDLE` when tracked work remains but

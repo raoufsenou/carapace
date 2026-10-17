@@ -25,8 +25,12 @@ Run these phases in order. Do not merge, reorder, or skip them because a reposit
 5. **Reconstruct proofs in ordered-register order.** Freeze requirements first, then inspect current
    definitions, entry points, consumers, durable effects, and focused evidence. Write no proof from old
    completion prose alone. Complete every pre-existing `DONE` proof before the migration task's own proof.
-6. **Prove rejection before acceptance.** Run the skill-owned mutation suite, then its checker against the
-   target. Run only repository-native semantic gates, in the repository's required order.
+   Never mutate repository files on disk or write temporary `/tmp/` scripts to simulate falsification during
+   migration; cite existing negative tests or current source/boundary inspections.
+6. **Verify with the target checker and native gates.** Run `check-execution-plan.mjs --root <repo>` against
+   the target repository and run only repository-native semantic gates (using the exact test runner in the
+   target's `package.json`, never assuming `pnpm` when no `pnpm-lock.yaml` exists). Never run the skill's own
+   `execution-register.test.mjs` self-test suite during user repository migration.
 7. **Close atomically.** After checks pass, write the migration task's proof, change it from `NOW` to `DONE`,
    and compute the pointer from register facts: `IDLE` when unordered work remains, otherwise `NONE`. Never
    select a product task during closeout. Rerun the checker after the final state edit.
@@ -99,24 +103,17 @@ snapshot and point to the canonical register. Preserve findings, reasoning, and 
 
 ## 5. Configure the skill-owned checker
 
-Do not copy files from `assets/checker/` into the target. The installed skill is the only checker and
-mutation-test implementation. Add one target-owned `.execution-plan-integrity.json` file containing only
-repository-specific paths and roles, then invoke the global checker from the target root.
-
-Run the skill-owned rejection suite:
-
-```bash
-node /absolute/path/to/execution-plan-integrity/assets/checker/execution-register.test.mjs
-```
-
-Run the skill-owned target checker:
+Do not copy files from `assets/checker/` into the target. The installed skill is the only checker
+implementation. Add one target-owned `.execution-plan-integrity.json` file containing only
+repository-specific paths and roles, then invoke the global checker from the target root:
 
 ```bash
 node /absolute/path/to/execution-plan-integrity/assets/checker/check-execution-plan.mjs --root /absolute/path/to/repository
 ```
 
-Do not add a package script or make the target's ordinary test gate depend on a user-specific global path.
-Do not loosen parser invariants to accommodate malformed state; fix the register.
+Never run `execution-register.test.mjs` against a user repository (that file is the skill repository's own
+unit test suite). Do not add a package script or make the target's ordinary test gate depend on a
+user-specific global path. Do not loosen parser invariants to accommodate malformed state; fix the register.
 
 The config has this shape:
 

@@ -16,12 +16,12 @@ export const ARTIFACT_ENTRIES = Object.freeze([
 export const REQUIRED_ARTIFACT_FILES = ARTIFACT_ENTRIES
 
 export const ARTIFACT_SHA256 = Object.freeze({
-  'SKILL.md': '845028acb839a298978b59f2f7dade20773c2a33bf8f99f47fc8a5a3244a9728',
+  'SKILL.md': '98b7008dbd38d36be24f311defba5914bc5ec7ade5ec491284005e898cc540f3',
   'agents/openai.yaml': 'd9322ee1351bdce6770eb1994f18a8bb485fc97abdd0bc56e356acc44c3c93cb',
   'references/contract.md': '4019b39dcce61ee5d6eb59ef3da7eb21a71fc33e4409e8c4b4565ea1ee37f46e',
-  'references/migration.md': '3498814f9e5eb438f0607f85a2a148237f5e136009c86dbc9b48c9c857527947',
+  'references/migration.md': '7f2eef4cb63f1906c4e3bbdff74fb646de288d715cd446d4b67be875fba44fc6',
   'references/report-template.md': 'ead9b414a89777e9add4cf38b99ea23a24541b8edbf29b657eeb2f8cd10f7d66',
-  'references/completion-proof.md': 'ca4c2095035c433c9ee257c1f97ec479bb8422dfcaf04bd37a47a70b25147d3a',
+  'references/completion-proof.md': 'bb4af9fbfbf3636f545166c36d79f705349e2c27f25c790acfcdd494a10ab238',
   'assets/checker/check-execution-plan.mjs': '6ff5f0ea38639f62ed272d3d5371c756c9bc55aa5c16f200430212af42ece262',
   'assets/checker/completion-proof.mjs': 'd0d6e6b2001390d5b83ba34fbe94843a7bacbe43be8b6b8060f56a47c76ab4b9',
   'assets/checker/execution-register.mjs': 'd02240a65314dda97f57034c8f5e3ac63fc31923b9e5f14ad33d3cc8c860c659',

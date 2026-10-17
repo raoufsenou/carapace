@@ -41,14 +41,14 @@ Implementation evidence must point to definitions and integration consumers, not
 faithfully exercise the wrong or orphaned code. Conversely, source presence without an exercised caller
 does not prove delivery.
 
-Valid verification kinds are:
+Valid verification kinds and their required fields are:
 
-- `test` — focused automated behavior or integration check;
-- `mutation` — deliberate break proving the assertion catches the claimed defect;
-- `inspection` — current definition/caller/schema/route trace;
-- `manual` — recorded human acceptance for rendered or physical behavior;
-- `external` — evidence from a third-party implementation or external system; and
-- `static` — type, lint, schema or policy validation that can reject the wrong state.
+- `test` — focused automated behavior or integration check (requires non-empty `command`);
+- `mutation` — deliberate break proving the assertion catches the claimed defect (requires non-empty `command`);
+- `inspection` — current definition/caller/schema/route trace (requires non-empty `evidence`);
+- `manual` — recorded human acceptance for rendered or physical behavior (requires non-empty `evidence`);
+- `external` — evidence from a third-party implementation or external system (requires repo-relative `record` file path); and
+- `static` — type, lint, schema or policy validation that can reject the wrong state (requires non-empty `command`).
 
 Use the narrowest evidence that can fail for the requirement. A repository-wide green suite may be
 supporting evidence, but it never replaces a missing requirement-specific proof.
@@ -68,9 +68,11 @@ An `IMPLEMENTATION`, `MIGRATION` or `OPERATIONS` task records:
 - each required downstream consumer; and
 - at least one falsification attempt appropriate to the risk.
 
-Examples of falsification include removing the new guard, planting a fixture beyond a claimed bound,
-exercising the negative authorization path, validating the stored row after a refusal, or manually
-checking the actual UI path. Do not weaken or undo the task to buy a green result.
+Examples of falsification include citing a negative test case that asserts a refusal (`kind: "test"`),
+inspecting a guard or boundary condition in current source (`kind: "inspection"`), validating a stored row
+after a refusal, or manually checking the actual UI path. Never write temporary `/tmp/` scripts that
+physically mutate and restore repository files on disk merely to populate a `falsification` entry. Do not
+weaken or undo the task to buy a green result.
 
 ## Non-implementation completion
 
