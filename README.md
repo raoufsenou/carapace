@@ -2,6 +2,9 @@
 
 A single self-contained Claude Code plugin bundling `carapace` orchestration, `execution-plan-integrity`, `app-slop-audit`, six `carapace-*` subagents, the live `AbovePrompt` progress bar, the Agents side panel, and automatic next-step prompt suggestions.
 
+- **GitHub repository**: `https://github.com/raoufsenou/carapace` (renamed from `raoufsenou/cc-mods`)
+- **Local checkout**: `/Users/raouf/Desktop/dz-projects/carapace` (renamed from `/Users/raouf/Desktop/dz-projects/cc-mods`)
+
 ## Install for Claude Code, Codex, and Cursor
 
 From a local checkout, the default command installs only into Claude Code (`~/.claude`). Codex and Cursor are not touched unless named with `--target`:
@@ -19,7 +22,7 @@ node scripts/install.mjs --target all
 Or install only the Claude Code plugin directly via `claude`:
 
 ```bash
-claude plugin install carapace --marketplace /path/to/cc-mods
+claude plugin install carapace --marketplace /path/to/carapace
 ```
 
 ## Command Surface (One Slash Command: `/carapace`)
