@@ -1,5 +1,6 @@
 ---
 name: carapace-careful
+model: inherit
 description: "Carapace careful worker. Well-understood but delicate work: multi-file refactors, bug fixes that must preserve invariants, per-app worktree batch execution, and changes with strict proof and ownership rules. Spawned only by the /carapace orchestrator."
 ---
 

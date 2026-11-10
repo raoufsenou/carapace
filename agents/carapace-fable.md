@@ -1,5 +1,6 @@
 ---
 name: carapace-fable
+model: inherit
 description: Carapace top worker. Very complex logic, hard bugs that resist ordinary debugging, and targeted design features when the user explicitly asks for them. Works under execution-plan-integrity and app-slop-audit contracts. Spawned only by the /carapace orchestrator.
 ---
 

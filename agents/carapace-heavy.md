@@ -1,5 +1,6 @@
 ---
 name: carapace-heavy
+model: inherit
 description: Carapace heavy worker. Unfamiliar or messy code, multi-file changes, tricky logic, non-obvious architecture, root-cause debugging. Works under execution-plan-integrity and app-slop-audit contracts. Spawned only by the /carapace orchestrator.
 ---
 

@@ -1,5 +1,6 @@
 ---
 name: carapace-advisor
+model: inherit
 description: Read-only carapace state researcher, fan-out feasibility analyzer, and prompt generator. Inspects .execution-plan-integrity.json, the canonical execution register, docs/audit records, and git/worktree state, determines whether upcoming work can safely run in parallel fan-out mode or must run sequentially (or hybrid), and outputs a copy-ready orchestration prompt.
 tools: Read, Glob, Grep, Bash
 ---

@@ -1,5 +1,6 @@
 ---
 name: carapace-light
+model: inherit
 description: Carapace light worker. Mechanical edits, renames, boilerplate, config changes, small isolated fixes, running builds/tests and reporting under execution-plan-integrity and app-slop-audit. Spawned only by the /carapace orchestrator.
 ---
 

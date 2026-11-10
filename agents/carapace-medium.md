@@ -1,5 +1,6 @@
 ---
 name: carapace-medium
+model: inherit
 description: Carapace medium worker. Standard feature work, bug fixes with a known cause, and scoped app-slop-audit or execution-plan steps confined to a few files with clear requirements. Spawned only by the /carapace orchestrator.
 ---
 
