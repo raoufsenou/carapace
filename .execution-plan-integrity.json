@@ -1,0 +1,14 @@
+{
+  "schema": 2,
+  "canonical": "docs/execution-plan.md",
+  "completionProofs": {
+    "directory": "docs/execution-proofs"
+  },
+  "requiredGlobs": ["docs/**/*plan*.md", "docs/**/*audit*.md"],
+  "roles": {
+    "evidence": ["docs/**/*audit*.md"],
+    "validation": ["docs/**/*validation*.md"],
+    "design": ["docs/**/*design*.md"],
+    "archive": ["docs/archive/**/*.md"]
+  }
+}

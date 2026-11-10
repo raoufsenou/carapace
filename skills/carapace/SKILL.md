@@ -33,6 +33,10 @@ Task from the user: $ARGUMENTS
    - Kill any dev server, watcher, or background process you started the moment its check returns.
 4. **Worker and advisor availability**:
    - Subagents must exist: `carapace-advisor` (read-only state researcher, fan-out feasibility analyzer, and prompt generator) and the five execution workers `carapace-fable`, `carapace-heavy`, `carapace-careful`, `carapace-medium`, `carapace-light` (or namespaced as `carapace:carapace-*`).
+5. **Model inheritance (`D-MODEL-INHERIT`)**:
+   - Every `carapace:*` advisor/worker runs on **exactly the orchestrator session's live model** (`default` / `auto` / whatever the maintainer selected). Agent defs keep `model: inherit`.
+   - When calling `Agent` for any `carapace:*` type, **omit the `model` parameter entirely**. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model override — those pins break inheritance (and `inherit` is not even a valid Agent `model` enum value).
+   - Only the orchestrator spawns `carapace:*` agents. Workers' tool allowlists exclude `Agent`, so they cannot re-delegate.
 
 ## Live view (`mcp__carapace__progress`, `TodoWrite` / `update_plan`, & `status.mjs`)
 
@@ -182,7 +186,7 @@ Read only `app-slop-audit/references/records.md` and the single mode reference y
        1. Confirm `git status` is clean and no one outside the run is working in the repo; record the audit fan-out in the canonical execution register (`docs/execution-plan.md`).
        2. Confirm severity definitions for any app missing `config.json` upfront so no worker has to ask.
        3. Build each app at the audited commit one after another and serve each on its own isolated port with its own data copy (and external/paid calls pointed at a refusing address), recording each server's PID.
-       4. Update `mcp__carapace__progress` (`title: "Audit <apps>"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app concurrently in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll `/tmp/` handoff files with `sleep` loops). **Browser CDP isolation for `ui` audits**: if workers share a single Chrome DevTools / CDP instance, either assign each worker its own dedicated browser tab/target ID or serialize browser navigation/screenshot commands through `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs run -- <command>` so two workers never navigate the same page tab at the same time. **No browser in `non-ui` audits**: for `non-ui` audits, workers and the coordinator must **never** launch headless Chrome/Playwright, take screenshots of `review.html`, or add browser screenshot helpers to `tools/audit/` (`check-records.mjs --report` verifies `review.html` statically); workers should use a single fast `01-capture.mjs` script (calling `mcp__carapace__step` at each milestone) and copy `report.css` / `report.js` via `cp` without reading them. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers in its final message to the coordinator.
+       4. Update `mcp__carapace__progress` (`title: "Audit <apps>"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app concurrently in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll `/tmp/` handoff files with `sleep` loops; **omit `model` on every spawn**). **Browser CDP isolation for `ui` audits**: if workers share a single Chrome DevTools / CDP instance, either assign each worker its own dedicated browser tab/target ID or serialize browser navigation/screenshot commands through `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs run -- <command>` so two workers never navigate the same page tab at the same time. **No browser in `non-ui` audits**: for `non-ui` audits, workers and the coordinator must **never** launch headless Chrome/Playwright, take screenshots of `review.html`, or add browser screenshot helpers to `tools/audit/` (`check-records.mjs --report` verifies `review.html` statically); workers should use a single fast `01-capture.mjs` script (calling `mcp__carapace__step` at each milestone) and copy `report.css` / `report.js` via `cp` without reading them. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers in its final message to the coordinator.
        5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, automatically run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html` when shared findings exist; on `v<N>` with `N > 1` and no new or reopened shared findings, leave `shared/` at its existing version), run `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> --report`, and **stop** with `nextPrompt: "/carapace decide shared"` (or the next stage from `status.mjs --json` if all apps had `0` open findings).
 
 ---
@@ -228,7 +232,10 @@ Use when the repository is already set up with `.execution-plan-integrity.json` 
 
 ### 3. Subagent Roles (`carapace-advisor` & `carapace-*` Workers)
 
-Never override or hardcode model or effort settings — subagents inherit whatever model and effort the agent harness is configured to use. Match the subagent role to the nature of the task:
+**Model inheritance (`D-MODEL-INHERIT`) — non-negotiable**:
+- Every `carapace:*` spawn **omits** the Agent tool `model` parameter so frontmatter `model: inherit` takes the orchestrator's live model. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model/effort override for a `carapace:*` spawn.
+- Only the orchestrator spawns `carapace:*` workers/advisors. Workers must not re-delegate; their `tools:` allowlists exclude `Agent`.
+- Match the subagent **role** (not model) to the nature of the task:
 
 | Role | Agent | Use for |
 |------|-------|---------|
@@ -246,7 +253,7 @@ When working through the plan one task at a time:
 1. **Identify `NOW`**: Read the single `NOW` row in the canonical register, its requirement sources, and (if it is an `app-slop-audit` step) the accepted findings it closes.
 2. **Delegate**:
    - Update `mcp__carapace__progress` (`phase: "delegate"`, `title`, `total`, `done`, `tasks`).
-   - Spawn the chosen `carapace-*` worker via `Agent` in the **foreground** (`run_in_background` omitted or `false`, with `description` = the task's `title`) so the orchestrator reviews and closes the step in the same turn without extra background wake-up round-trips. Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
+   - Spawn the chosen `carapace-*` worker via `Agent` in the **foreground** (`run_in_background` omitted or `false`, with `description` = the task's `title`, and **no `model` parameter**) so the orchestrator reviews and closes the step in the same turn without extra background wake-up round-trips. Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
    - Instruct the worker **not** to edit the canonical execution register document; the orchestrator updates the register after review.
 3. **Adversarial Review & Semantic Close (`execution-plan-integrity` `close` + `app-slop-audit` `apply`)**:
    - Switch `mcp__carapace__progress` `phase` to `"review"`.
@@ -286,7 +293,7 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
    - Install dependencies in each worktree as the project requires (`pnpm install`), and copy any ignored local environment files (`cp`) without reading or printing their contents.
 4. **Update `mcp__carapace__progress` (and `TodoWrite` if requested) & spawn `carapace-*` workers**:
    - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of worker slices or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per worker/member, matching the `Agent` `description`).
-   - Launch one `carapace-*` worker per slice concurrently in a single message in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll with `sleep` loops). Each worker brief must state:
+   - Launch one `carapace-*` worker per slice concurrently in a single message in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll with `sleep` loops; **omit `model` on every spawn**). Each worker brief must state:
      - Its slice/app name, `worktree` path, `branch`, exact owned `paths` (folders or individual files), and ordered member task IDs (`<STEP-ID>`) with their full register rows;
      - The committed audit `toolkit` path, settled audit principles, and the shared-code paths it must not modify;
      - The serialized command queue: every command that installs, builds, tests, serves, or measures must run via:

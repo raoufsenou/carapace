@@ -51,7 +51,7 @@ Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags:
   - `carapace`: orchestrator playbook driving the full lifecycle (user-invocable as `/carapace`) plus `skills/carapace/assets/status.mjs` (`--json`, `--check`, `--prompt`).
   - `execution-plan-integrity`: internal single-source execution register and semantic closure proof contract + checker (`skills/execution-plan-integrity/assets/checker/`, `user-invocable: false`).
   - `app-slop-audit`: internal UI and non-UI slop audit contract, record checker (`skills/app-slop-audit/assets/checker/`), worktree fan-out queue (`skills/app-slop-audit/assets/fanout/fanout.mjs`), and HTML report template (`user-invocable: false`).
-- **Agents (`agents/`)** (all subagents inherit whatever model and effort your agent harness is configured to use):
+- **Agents (`agents/`)** (every `carapace:*` agent uses frontmatter `model: inherit` and is spawned with the Agent `model` parameter omitted, so it always runs on the orchestrator session's live model — `default` / `auto` / whatever you selected; workers' tool allowlists exclude `Agent` so they cannot re-delegate onto another model):
 
   | Agent | For |
   | --- | --- |

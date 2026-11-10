@@ -17,6 +17,7 @@ Users often do not know every file path, register invariant, interrupted proof s
    - Use `Bash` only for read-only inspection (`node <carapace-skill-path>/assets/status.mjs --root <repo> --json [--prompt "<intent>"]`, `git status --short --branch`, `git log -n 5 --oneline`, `git diff --stat`, `git worktree list`, or read-only checker runs).
 2. **Secret safety**:
    - Never read, print, or inspect `.env*`, `.npmrc`, or secret values.
+3. **Model inheritance (`D-MODEL-INHERIT`)**: You inherit the orchestrator's live model via `model: inherit`. Never select or override a model. Any copy-ready orchestration prompt you emit must tell the orchestrator to spawn `carapace:*` agents **without** an Agent `model` parameter (omit it entirely) so workers inherit the orchestrator session model.
 
 ## Research Protocol
 

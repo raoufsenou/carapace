@@ -11,3 +11,6 @@ artifacts/
 node_modules/
 .env
 .env.*
+
+# Generated audit report assets
+docs/audit/*/*/reports/

@@ -1,0 +1,127 @@
+{
+  "schema": 1,
+  "taskId": "WORKER-MODEL-INHERIT",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-10",
+  "requirements": [
+    {
+      "id": "REQ-MI-1",
+      "statement": "All six carapace agent defs keep frontmatter model: inherit so they take the orchestrator session model.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "D-MODEL-INHERIT" },
+      "evidence": [
+        { "path": "agents/carapace-advisor.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-heavy.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-fable.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-careful.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-medium.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-light.md", "symbol": "model: inherit" }
+      ],
+      "verification": [
+        {
+          "kind": "static",
+          "command": "python3 -c \"from pathlib import Path; assert all('model: inherit' in p.read_text().split('---',2)[1] for p in Path('agents').glob('carapace-*.md'))\"",
+          "result": "passed",
+          "checkedAt": "2026-11-10"
+        }
+      ]
+    },
+    {
+      "id": "REQ-MI-2",
+      "statement": "Orchestrator and advisor contracts require omitting the Agent model parameter on every carapace:* spawn so inherit takes the live orchestrator model; model pins are forbidden.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "D-MODEL-INHERIT" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "omit the `model` parameter entirely" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "no `model` parameter" },
+        { "path": "agents/carapace-advisor.md", "symbol": "Agent `model` parameter" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "skills/carapace/SKILL.md invariants §5 and §3 plus single-task/batch/audit spawn sites all require omitting Agent model; advisor non-negotiable rule 3 requires generated prompts to say the same.",
+          "result": "passed",
+          "checkedAt": "2026-11-10"
+        }
+      ]
+    },
+    {
+      "id": "REQ-MI-3",
+      "statement": "Only the orchestrator may spawn carapace:* agents; workers must not re-delegate.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "D-MODEL-INHERIT" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "Only the orchestrator spawns `carapace:*` agents" },
+        { "path": "agents/carapace-heavy.md", "symbol": "Never spawn `carapace:*`" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "All five worker bodies include the D-MODEL-INHERIT no-re-delegation rule; SKILL.md states only the orchestrator spawns carapace:* agents.",
+          "result": "passed",
+          "checkedAt": "2026-11-10"
+        }
+      ]
+    },
+    {
+      "id": "REQ-MI-4",
+      "statement": "Mechanical enforcement: worker tool allowlists exclude Agent so the nested-sonnet→Argon failure mode cannot recur via worker re-delegation.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "D-MODEL-INHERIT" },
+      "evidence": [
+        { "path": "agents/carapace-heavy.md", "symbol": "tools: Read, Write, Edit, Bash, Glob, Grep, mcp__carapace__step" },
+        { "path": "agents/carapace-light.md", "symbol": "tools: Read, Write, Edit, Bash, Glob, Grep, mcp__carapace__step" },
+        { "path": "agents/carapace-medium.md", "symbol": "tools: Read, Write, Edit, Bash, Glob, Grep, mcp__carapace__step" },
+        { "path": "agents/carapace-careful.md", "symbol": "tools: Read, Write, Edit, Bash, Glob, Grep, mcp__carapace__step" },
+        { "path": "agents/carapace-fable.md", "symbol": "tools: Read, Write, Edit, Bash, Glob, Grep, mcp__carapace__step" },
+        { "path": "agents/carapace-advisor.md", "symbol": "tools: Read, Glob, Grep, Bash" }
+      ],
+      "verification": [
+        {
+          "kind": "static",
+          "command": "python3 -c \"from pathlib import Path;\nworkers=['carapace-light.md','carapace-medium.md','carapace-heavy.md','carapace-careful.md','carapace-fable.md'];\nfor name in workers:\n fm=Path('agents',name).read_text().split('---',2)[1];\n tools=next(l for l in fm.splitlines() if l.startswith('tools:'));\n assert 'Agent' not in tools and 'mcp__carapace__step' in tools, name;\nadv=next(l for l in Path('agents/carapace-advisor.md').read_text().split('---',2)[1].splitlines() if l.startswith('tools:'));\nassert 'Agent' not in adv\"",
+          "result": "passed",
+          "checkedAt": "2026-11-10"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "agents/carapace-advisor.md",
+    "agents/carapace-careful.md",
+    "agents/carapace-fable.md",
+    "agents/carapace-heavy.md",
+    "agents/carapace-light.md",
+    "agents/carapace-medium.md",
+    "skills/carapace/SKILL.md",
+    "README.md"
+  ],
+  "integration": [
+    {
+      "entryPoint": "/carapace run <TASK> orchestrator Agent spawn",
+      "implementation": "skills/carapace/SKILL.md#omit the `model` parameter entirely",
+      "consumer": "agents/carapace-heavy.md#model: inherit"
+    },
+    {
+      "entryPoint": "worker tool surface",
+      "implementation": "agents/carapace-heavy.md#tools: Read, Write, Edit, Bash, Glob, Grep, mcp__carapace__step",
+      "consumer": "skills/carapace/SKILL.md#Workers' tool allowlists exclude `Agent`"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "A nested carapace-heavy cannot pass model: sonnet (the 2026-11-10 Argon path) because worker tools: lines exclude Agent entirely.",
+      "kind": "inspection",
+      "evidence": "For each worker frontmatter tools line, 'Agent' is absent; therefore the Agent tool call that set model:sonnet after model:inherit was rejected cannot be issued by a worker.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": { "status": "DELIVERED" },
+  "unverified": [],
+  "outOfScope": [
+    "Maintainer omniroute / ANTHROPIC_DEFAULT_*_MODEL harness routing (D-MODEL-INHERIT non-goal)."
+  ],
+  "closedRow": "| 1 | `WORKER-MODEL-INHERIT` | `IMPLEMENTATION` | `NOW` | Enforce `D-MODEL-INHERIT` so every `carapace:*` spawn inherits the orchestrator's live model (`default`/`auto`/whatever is selected) with no override path left open: keep `model: inherit` on all six agent defs; update `skills/carapace/SKILL.md` and every worker agent body so orchestrator spawns omit `model` and workers never spawn `carapace:*` or pass Agent `model`; apply mechanical enforcement (worker `tools:` allowlist excluding `Agent`, or equivalent); cover advisor/README contract text; prove REQ-MI-1..4 with falsification that the nested-`sonnet`→Argon failure mode cannot recur. Do not change omniroute settings. | `D-MODEL-INHERIT`; incident 2026-11-10 drafter session `1cb50541…` child `a096d5e6…`. |",
+  "notes": [
+    "Root cause was worker re-delegation: nested carapace-heavy passed model:inherit (invalid Agent enum), then model:sonnet, which omniroute routed to gemini-4-argon while the parent stayed on default.",
+    "Mechanical fix: workers and advisor keep model: inherit; workers' tools allowlists omit Agent; SKILL/advisor/README require omitting Agent model on every carapace:* spawn.",
+    "Live plugin cache refreshed with node scripts/install.mjs --replace."
+  ]
+}
