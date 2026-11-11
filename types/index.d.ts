@@ -52,6 +52,11 @@ export type Panel = {
   isRoundDone?: boolean
 }
 
+/** Set when session.start probe (or a handler catch) sees catalog-yes/handler-no. */
+export type LiveTools = {
+  broken: boolean
+}
+
 declare module 'claude-code' {
   interface PluginState {
     carapace: {
@@ -59,6 +64,7 @@ declare module 'claude-code' {
       agents: AgentRun[]
       panel: Panel
       now: number
+      liveTools: LiveTools
     }
   }
 }

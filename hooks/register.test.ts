@@ -265,6 +265,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     expect(seenPrompts['carapace-advisor']).toBe('Inspect canonical register and fan-out feasibility.')
     expect(seenPrompts['carapace-careful']).toContain('mcp__carapace__step')
+    expect(seenPrompts['carapace-careful']).toContain('no tool.call hook answered')
 
     if (surface === 'terminal') {
       const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })

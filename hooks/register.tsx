@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { AgentRun, Flow, Panel, Phase, PlannedTask } from '../types'
+import type { AgentRun, Flow, LiveTools, Panel, Phase, PlannedTask } from '../types'
 
 const flow = atom({ plugin: 'carapace', key: 'flow' } as const, null)
 const agents = atom({ plugin: 'carapace', key: 'agents' } as const, [])
@@ -11,15 +11,21 @@ const panel = atom({ plugin: 'carapace', key: 'panel' } as const, {
   autoOpenedFor: '',
 })
 const now = atom({ plugin: 'carapace', key: 'now' } as const, 0)
+const liveTools = atom({ plugin: 'carapace', key: 'liveTools' } as const, { broken: false } satisfies LiveTools)
 
 const TOOL = 'mcp__carapace__progress'
 const STEP_TOOL = 'mcp__carapace__step'
+// Wire names and the short register names both appear in tool.call events depending on host path.
+const PROGRESS_NAMES = new Set([TOOL, 'progress'])
+const STEP_NAMES = new Set([STEP_TOOL, 'step'])
+// Loopback MCP CallTool stub when hooks-worker did not answer — catalog yes, handler no.
+const STUB_ANSWER_RE = /no tool\.call hook answered/i
 // Added to the end of each worker's brief during a flow or carapace-* run. Their system
 // prompt words step reporting as a condition ("if the step tool appears among your tools")
 // and they skip it even with the tool listed; the same request in the brief is followed.
 const STEP_BRIEF = `
 
-Progress reporting: before any other work, call \`${STEP_TOOL}\` (the MCP tool \`mcp__carapace__step\`, never \`mcp__carapace__progress\`) with \`total\` (your assigned step count in a batch, or 3-8 steps for a single task) and \`done: 0\`; call \`${STEP_TOOL}\` again with \`done\` and a few-word \`note\` (such as the step ID) as each step finishes. It only draws a progress bar.`
+Progress reporting: before any other work, call \`${STEP_TOOL}\` (the MCP tool \`mcp__carapace__step\`, never \`mcp__carapace__progress\`) with \`total\` (your assigned step count in a batch, or 3-8 steps for a single task) and \`done: 0\`; call \`${STEP_TOOL}\` again with \`done\` and a few-word \`note\` (such as the step ID) as each step finishes. It only draws a progress bar. If a call returns an error containing \`no tool.call hook answered\`, stop calling it for the rest of this run — do not retry.`
 const REGISTER_CONFIG = '.execution-plan-integrity.json'
 const REGISTER_START = '<!-- execution-register:start -->'
 const REGISTER_END = '<!-- execution-register:end -->'
@@ -896,7 +902,11 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
   const p = await read($, panel)
   if (p.autoOpenedFor === key) return
   await update($, panel, prev => ({ ...prev, autoOpenedFor: key }))
-  void $.ui.open({ id: PANE, title: STRINGS.pane })
+  try {
+    await $.ui.open({ id: PANE, title: STRINGS.pane })
+  } catch {
+    // Panel open is best-effort; progress must still answer.
+  }
 }
 
 async function suggestNext($: EngineInterface, text: string | undefined): Promise<void> {
@@ -1016,6 +1026,86 @@ async function syncRegister($: EngineInterface, editedFile?: string): Promise<vo
   }
 }
 
+const toolNameOf = (e: { tool?: unknown }): string => (typeof e.tool === 'string' ? e.tool : '')
+
+const resultTextOf = (v: unknown): string => {
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object' && 'result' in v) return String((v as { result: unknown }).result ?? '')
+  return v == null ? '' : String(v)
+}
+
+const markLiveTools = async ($: EngineInterface, broken: boolean): Promise<void> => {
+  await update($, liveTools, prev => (prev.broken === broken ? prev : { broken }))
+}
+
+// Always return `{ result }` so a throw never falls through to the loopback MCP CallTool stub.
+async function answerProgress($: EngineInterface, e: { agentId?: string }): Promise<{ result: string }> {
+  try {
+    if (e.agentId) return { result: 'ignored: only the main session reports the flow' }
+    const input = e as unknown as ProgressInput
+    const prev = await read($, flow)
+    if (isNewFlow(prev, input) && !input.finished) {
+      await update($, agents, list => list.filter(a => a.status === 'running'))
+      await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '' }))
+    }
+    const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
+    if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
+    if (next?.nextPrompt && (input.nextPrompt !== undefined || next.isFinished)) {
+      await update($, panel, p => ({ ...p, registerPrompt: next.nextPrompt }))
+      await suggestNext($, next.nextPrompt)
+    }
+    return { result: `ok: ${label(next ?? blank())}` }
+  } catch (err) {
+    await markLiveTools($, true).catch(() => null)
+    const msg = err instanceof Error ? err.message : String(err)
+    return { result: `error: progress handler failed (${msg})` }
+  }
+}
+
+async function answerStep($: EngineInterface, e: { agentId?: string }): Promise<{ result: string }> {
+  try {
+    const input = e as unknown as { done?: number; total?: number; note?: string }
+    const agentId = e.agentId
+    if (!agentId) return { result: 'ignored: only subagents report steps' }
+    let matched = false
+    await update($, agents, list =>
+      list.map(a => {
+        if (a.agentId !== agentId) return a
+        matched = true
+        const total = Math.max(0, Math.round(input.total ?? a.stepTotal ?? 0))
+        const done = Math.max(0, Math.round(input.done ?? a.stepDone ?? 0))
+        return { ...a, stepTotal: total, stepDone: total ? Math.min(total, done) : done, stepNote: input.note?.trim() || undefined }
+      }),
+    )
+    return { result: matched ? 'ok' : `ignored: no panel row for agent ${agentId}` }
+  } catch (err) {
+    await markLiveTools($, true).catch(() => null)
+    const msg = err instanceof Error ? err.message : String(err)
+    return { result: `error: step handler failed (${msg})` }
+  }
+}
+
+async function probeLiveTools($: EngineInterface): Promise<void> {
+  // Prefer step: main-session call returns ignored without mutating the flow.
+  try {
+    const probed = await $.tool.call({ tool: STEP_TOOL, done: 0 } as never)
+    const text = resultTextOf(probed)
+    const broken = STUB_ANSWER_RE.test(text)
+    await markLiveTools($, broken)
+    if (broken) {
+      await $.ui.toast(
+        'carapace: progress/step are listed but tool.call is not answering — use TodoWrite / update_plan; do not retry',
+        { timeoutMs: 12000 },
+      ).catch(() => null)
+    }
+  } catch {
+    await markLiveTools($, true)
+    await $.ui
+      .toast('carapace: progress/step probe failed — use TodoWrite / update_plan; do not retry', { timeoutMs: 12000 })
+      .catch(() => null)
+  }
+}
+
 async function pruneCompletedRoundIfIdle($: EngineInterface): Promise<void> {
   const [list, curFlow, p] = await Promise.all([read($, agents), read($, flow), read($, panel)])
   if (!list.length || list.some(a => a.status === 'running')) return
@@ -1090,6 +1180,9 @@ export const register: Register = (on, options) => {
       isDeferred: false,
     })
 
+    // Catalog registration alone is not proof the hooks-worker will answer; probe once.
+    await probeLiveTools($)
+
     // Ticks the running agents' clocks; quiet when nothing runs.
     $.clock.every(1000, () => {
       void (async () => {
@@ -1112,24 +1205,17 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  on('tool.call', { tool: TOOL }, async ($, e) => {
-    // The flow is the main session's: a call from a worker's loop carries its agentId
-    // and changes nothing, or any subagent could rename, finish or reset the flow.
-    if (e.agentId) return { result: 'ignored: only the main session reports the flow' }
-    const input = e as unknown as ProgressInput
-    const prev = await read($, flow)
-    if (isNewFlow(prev, input) && !input.finished) {
-      // A new flow starts with a clean list; agents still running stay.
-      await update($, agents, list => list.filter(a => a.status === 'running'))
-      await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '' }))
-    }
-    const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
-    if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
-    if (next?.nextPrompt && (input.nextPrompt !== undefined || next.isFinished)) {
-      await update($, panel, p => ({ ...p, registerPrompt: next.nextPrompt }))
-      await suggestNext($, next.nextPrompt)
-    }
-    return { result: `ok: ${label(next ?? blank())}` }
+  // Wire-name filters (what the unanswered-hook error tells plugins to register) plus short names.
+  on('tool.call', { tool: TOOL }, async ($, e) => answerProgress($, e))
+  on('tool.call', { tool: 'progress' }, async ($, e) => answerProgress($, e))
+  on('tool.call', { tool: STEP_TOOL }, async ($, e) => answerStep($, e))
+  on('tool.call', { tool: 'step' }, async ($, e) => answerStep($, e))
+  // Broader match: if a host dispatches without a filter hit, still answer our tools and never fall through.
+  on('tool.call', async ($, e, next) => {
+    const name = toolNameOf(e)
+    if (PROGRESS_NAMES.has(name)) return answerProgress($, e)
+    if (STEP_NAMES.has(name)) return answerStep($, e)
+    return next(e)
   })
 
   // Refresh the canonical execution-register suggestion when the main session edits files or runs commands.
@@ -1147,24 +1233,6 @@ export const register: Register = (on, options) => {
       return res
     })
   }
-
-  // A worker's own progress: the call runs in the worker's loop, so agentId names it.
-  on('tool.call', { tool: STEP_TOOL }, async ($, e) => {
-    const input = e as unknown as { done?: number; total?: number; note?: string }
-    const agentId = e.agentId
-    if (!agentId) return { result: 'ignored: only subagents report steps' }
-    let matched = false
-    await update($, agents, list =>
-      list.map(a => {
-        if (a.agentId !== agentId) return a
-        matched = true
-        const total = Math.max(0, Math.round(input.total ?? a.stepTotal ?? 0))
-        const done = Math.max(0, Math.round(input.done ?? a.stepDone ?? 0))
-        return { ...a, stepTotal: total, stepDone: total ? Math.min(total, done) : done, stepNote: input.note?.trim() || undefined }
-      }),
-    )
-    return { result: matched ? 'ok' : `ignored: no panel row for agent ${agentId}` }
-  })
 
   // Safety net: worker launches move the faint layer even if the orchestrator forgets to report.
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
