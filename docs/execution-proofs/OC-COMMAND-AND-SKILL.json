@@ -1,0 +1,133 @@
+{
+  "schema": 1,
+  "taskId": "OC-COMMAND-AND-SKILL",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-22",
+  "requirements": [
+    {
+      "id": "REQ-OC-3-COMMAND",
+      "statement": "An OpenCode install generates commands/carapace.md whose template loads the @carapace skill and passes $ARGUMENTS.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-3" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "const openCodeCommandPath = (home) => join(home, 'commands', 'carapace.md')" },
+        { "path": "scripts/install.mjs", "symbol": "const OPENCODE_COMMAND = `" },
+        { "path": "scripts/install.mjs", "symbol": "skill and follow it for this request: $ARGUMENTS" },
+        { "path": "scripts/install.mjs", "symbol": "results.push(installOpenCodeCommand({ home: opencodeHome, replace, changed: commandChanged }))" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "A temporary HOME install wrote ~/.config/opencode/commands/carapace.md containing the frontmatter description plus 'Load the @carapace skill and follow it for this request: $ARGUMENTS'. OpenCode v2.3.2's server API does not surface global file-based commands: dummy global command and skill probes were also absent from /api/command and /api/skill, so verification is by documented path and content, not API listing.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        },
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-1-COMMAND-SAFETY",
+      "statement": "The generated command follows the installer's idempotence and --replace contract without mutating on a conflict.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-1" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "function checkOpenCodeCommand(home, replace)" },
+        { "path": "scripts/install.mjs", "symbol": "Rerun with --replace to replace it." },
+        { "path": "scripts/install.mjs", "symbol": "function installOpenCodeCommand({ home, replace, changed })" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The command conflict is checked before the skills/agents harness writes anything. In a temp home, editing commands/carapace.md made the next install fail with 'carapace.md (changed)' and 'Rerun with --replace'; --replace restored it and the following run reported 'already matches'.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-5-DELEGATION",
+      "statement": "SKILL.md delegates harness-neutrally: OpenCode uses the subagent tool with no model override and plain carapace-* IDs; workers are background and reviewed on idle.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-5" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "In OpenCode, call the `subagent` tool (agent ID, `description`, full `prompt`) with no model field" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "plain `carapace-*` IDs in OpenCode, Codex, and Cursor" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "OpenCode subagents always run in the background" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "plain `carapace-advisor` elsewhere" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "A temp-home install copied a SKILL.md containing the OpenCode delegation rule, plain IDs, the background-review rule, and no remaining one-sided 'in Codex and Cursor' or namespacing-only phrases.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-5-FALLBACK",
+      "statement": "SKILL.md has an OpenCode live-view branch: no progress MCP tools or harness checklist, status.mjs footer only, with fail-closed preserved in Claude Code.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-5" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "In Codex, Cursor, and OpenCode (where Claude Code's runtime SDK tools" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "OpenCode has no equivalent checklist here, so the `status.mjs` footer below is its only progress view." },
+        { "path": "skills/carapace/SKILL.md", "symbol": "Never call `mcp__carapace__progress` or `mcp__carapace__step` in these harnesses" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "Every later reference to `mcp__carapace__progress` or `mcp__carapace__step` in this playbook follows the harness branch below" },
+        { "path": "skills/carapace/SKILL.md", "symbol": "in Codex, Cursor, and OpenCode." }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The live-view paragraph makes all later progress-tool calls follow the harness branch; the third branch forbids those calls and names status.mjs as OpenCode's only progress view; the Claude Code broken-present fail-closed rule is unchanged. The temp-installed copy contains all of these lines.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "scripts/install.mjs",
+    "skills/carapace/SKILL.md"
+  ],
+  "integration": [
+    {
+      "entryPoint": "/carapace <arguments> invoked in OpenCode",
+      "implementation": "scripts/install.mjs#skill and follow it for this request: $ARGUMENTS",
+      "consumer": "skills/carapace/SKILL.md#Entry Dispatch: Bare"
+    },
+    {
+      "entryPoint": "OpenCode worker delegation from the orchestrator",
+      "implementation": "skills/carapace/SKILL.md#In OpenCode, call the `subagent` tool",
+      "consumer": "skills/carapace/SKILL.md#In Codex, Cursor, and OpenCode"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "A diverged command file cannot be overwritten silently: the install refuses before any skill or agent is written.",
+      "kind": "inspection",
+      "evidence": "The temp-home run with a hand-edited commands/carapace.md failed with the changed-file error and 'Rerun with --replace'; checkOpenCodeCommand is called before installSkillAndAgentHarness in the opencode dispatch branch.",
+      "result": "passed"
+    },
+    {
+      "assertion": "The v2.3.2 server API's omission of the installed command is an API limitation, not a broken install.",
+      "kind": "inspection",
+      "evidence": "Dummy global commands/zz-probe.md and skills/zz-probe/SKILL.md were also absent from /api/command and /api/skill on a dedicated server with the same temp config home.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": { "status": "DELIVERED" },
+  "unverified": [],
+  "outOfScope": [
+    "No HUD, Agents panel, Tab suggestions, or progress MCP tool port (D-OPENCODE-SUPPORT non-goal).",
+    "No model-driven end-to-end invocation of /carapace: running the skill would execute the orchestration playbook against a repository.",
+    "Dedicated installer tests and documentation remain OC-TESTS and OC-DOCS."
+  ],
+  "closedRow": "| 4 | `OC-COMMAND-AND-SKILL` | `IMPLEMENTATION` | `NOW` | Generate `~/.config/opencode/commands/carapace.md` with `@carapace` and `$ARGUMENTS`, and extend `skills/carapace/SKILL.md` with harness-neutral subagent wording plus the OpenCode live-view fallback (status.mjs footer, no progress MCP tools, fail-closed). Closes when `/carapace` loads the skill in a temporary OpenCode config home and the fallback is the only progress path used. | `D-OPENCODE-SUPPORT` REQ-OC-3, REQ-OC-5. |",
+  "notes": [
+    "The installed command and skill sit in OpenCode's documented global discovery directories; the v2.3.2 server API does not list global file-based commands or skills, which was confirmed with dummy probes.",
+    "No model-driven /carapace invocation was performed because the skill would begin orchestrating work in the target repository."
+  ]
+}

@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "taskId": "OC-SMOKE",
+  "taskKind": "VALIDATION",
+  "outcome": "VALIDATED",
+  "completedAt": "2026-11-22",
+  "requirements": [
+    {
+      "id": "REQ-OC-7-SKILL",
+      "statement": "In a temporary OpenCode config home, /carapace loads the carapace skill and runs the installed status.mjs against a sample repo.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-7" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "## Entry Dispatch: Bare" },
+        { "path": "scripts/install.mjs", "symbol": "skill and follow it for this request: $ARGUMENTS" }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "XDG_CONFIG_HOME=<temp> opencode --standalone run --model opencode/hy4-flash-free --format json 'Load the @carapace skill ...' from a sample repo with the installed skill and a copied canonical register",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        },
+        {
+          "kind": "inspection",
+          "evidence": "The JSON stream contained a tool part with tool='skill' and input.id='carapace', whose output was the loaded SKILL.md body. The model then ran status.mjs --root <sample repo> --json and reported the NOW ID OC-SMOKE and the first (Recommended) option.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-7-SUBAGENTS",
+      "statement": "The advisor and a worker spawn as OpenCode subagents on the orchestrator's live model with no model override.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-7" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "In OpenCode, call the `subagent` tool (agent ID, `description`, full `prompt`) with no model field" },
+        { "path": "scripts/install.mjs", "symbol": "target === 'opencode'" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "Two tool parts with tool='subagent' completed: input.agent='carapace-advisor' and input.agent='carapace-light', each with description and prompt and no model field. Child sessions ses_dfd9fce24ffecOCUqpgdQv631C (advisor) and ses_dfd9fce23ffemqT8cu2uw6rHBg (light) recorded model {'id':'hy4-flash-free','providerID':'opencode'}, the same model as the orchestrator run.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-7-NO-REDELEGATION",
+      "statement": "A worker cannot re-delegate to another carapace subagent.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-7" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "OpenCode workers carry a `subagent: deny` permission" },
+        { "path": "scripts/install.mjs", "symbol": "'  - action: subagent'" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "In a follow-up to the carapace-light child session, the worker reported that no delegation or subagent tool exists in its available toolset, so no subagent call could be issued; it explicitly declined to fabricate a denial message it never saw. Separately, debug agents listed a subagent deny permission on all five workers. The observed behavior is the stronger case: the delegation capability is absent rather than merely denied at call time.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-7-FOOTER",
+      "statement": "The OpenCode run ends with the two-line status.mjs footer as the only progress view.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-7" },
+      "evidence": [
+        { "path": "skills/carapace/SKILL.md", "symbol": "OpenCode has no equivalent checklist here, so the `status.mjs` footer below is its only progress view." },
+        { "path": "skills/carapace/assets/status.mjs", "symbol": "Carapace:" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "Final model output contained the two lines 'Carapace: [██████████████░░] 6/7 (86%) · NOW: OC-SMOKE' and 'Next → /carapace run OC-SMOKE'. No progress MCP tool or Agents panel appeared in the OpenCode session.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "docs/execution-proofs/OC-SMOKE.json"
+  ],
+  "integration": [
+    {
+      "entryPoint": "opencode run --standalone with @carapace prompt in a temp config home",
+      "implementation": "skills/carapace/SKILL.md#Entry Dispatch: Bare",
+      "consumer": "skills/carapace/assets/status.mjs#Carapace:"
+    },
+    {
+      "entryPoint": "orchestrator subagent tool calls",
+      "implementation": "scripts/install.mjs#target === 'opencode'",
+      "consumer": "agents/carapace-light.md#Model inheritance & no re-delegation"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "A worker cannot re-delegate: the capability is absent from its OpenCode toolset.",
+      "kind": "inspection",
+      "evidence": "The carapace-light child session was explicitly asked to attempt a subagent spawn and reported that no delegation tool was available; it did not invent a denial. Mechanical inspection also found the subagent deny permission on the installed worker definitions.",
+      "result": "passed"
+    },
+    {
+      "assertion": "The default provider lacked credits, but a free model still exercised the full path.",
+      "kind": "inspection",
+      "evidence": "A first run with the default provider returned provider.quota 402. Re-running with --model opencode/hy4-flash-free completed the skill load, both subagent spawns, and the footer, so the smoke result is from a real model-driven OpenCode session.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "TRACKED",
+    "taskIds": [
+      "OC-INSTALLER-TARGET",
+      "OC-AGENT-FRONTMATTER",
+      "OC-COMMAND-AND-SKILL",
+      "OC-TESTS"
+    ]
+  },
+  "unverified": [],
+  "outOfScope": [
+    "No layout or UI-parity check of a Claude Code HUD in OpenCode (D-OPENCODE-SUPPORT non-goal).",
+    "The explicit deny-error message for subagent delegation was not observed because the tool is absent from the worker toolset."
+  ],
+  "closedRow": "| 7 | `OC-SMOKE` | `VALIDATION` | `NOW` | In a real OpenCode session with a temporary config home and a sample repository, verify `/carapace` loads the skill, an advisor and a worker spawn as subagents on the orchestrator model, worker re-delegation is refused, and the two-line `status.mjs` footer appears. Closes when results are recorded and any failure returns to the owning implementation ticket. | `D-OPENCODE-SUPPORT` REQ-OC-7. |",
+  "notes": [
+    "Smoke ran with XDG_CONFIG_HOME pointed at a temporary config home and a sample repo holding a copied canonical register and integrity config; no files were edited in the source checkout.",
+    "The orchestrator model was opencode/hy4-flash-free; both child sessions recorded the same model with no model override passed to the subagent calls."
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "taskId": "OC-TESTS",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-22",
+  "requirements": [
+    {
+      "id": "REQ-OC-6-DEFAULT-AND-ALL",
+      "statement": "Tests assert the bare default installs only Claude Code and --target all includes opencode.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "scripts/install.test.mjs", "symbol": "targets: ['claude', 'codex', 'cursor', 'opencode']" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.equal(existsSync(env.OPENCODE_CONFIG_HOME), false)" },
+        { "path": "scripts/install.test.mjs", "symbol": "test('opencode is opt-in and the default install leaves its config home untouched'" }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-6-PATHS-AND-COMMAND",
+      "statement": "Tests assert opt-in opencode installs only drop-in skills, agents, and the generated command, with @carapace and $ARGUMENTS content and no opencode config file.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "scripts/install.test.mjs", "symbol": "test('opencode installs drop-in skills, agents, and a generated command under its config home only'" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.match(command, /@carapace/)" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.match(command, /\\$ARGUMENTS/)" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.equal(existsSync(join(opencodeHome, 'opencode.json')), false)" }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-6-AGENT-FRONTMATTER",
+      "statement": "Tests assert installed OpenCode agents have V2 frontmatter, inherited model, no Claude-only tool references, and deny permissions.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "scripts/install.test.mjs", "symbol": "test('opencode agent output drops Claude fields and permissions deny re-delegation'" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.doesNotMatch(worker, /^(name|model|tools):/m)" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.match(worker, /action: subagent/)" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.match(advisor, /action: edit/)" }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-6-REPLACE-AND-INDEPENDENCE",
+      "statement": "Tests assert diverged command, agent, and skill files are refused until --replace, installed copies are independent of the checkout, and a second run reports current.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "scripts/install.test.mjs", "symbol": "test('opencode command and agents are replace-gated and installed copies stay independent'" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.deepEqual(readFileSync(join(checkout, 'skills', 'carapace', 'SKILL.md')), sourceSkill)" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.deepEqual(current.map((result) => result.action), ['current', 'current'])" }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "scripts/install.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node --test scripts/install.test.mjs",
+      "implementation": "scripts/install.test.mjs#test('opencode installs drop-in skills, agents, and a generated command under its config home only'",
+      "consumer": "scripts/install.mjs#export function install({"
+    },
+    {
+      "entryPoint": "node --test scripts/install.test.mjs",
+      "implementation": "scripts/install.test.mjs#test('opencode command and agents are replace-gated and installed copies stay independent'",
+      "consumer": "scripts/install.mjs#function checkOpenCodeCommand(home, replace)"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "The new assertions can fail: a hand-edited installed command, agent, or skill makes the next install throw until --replace.",
+      "kind": "test",
+      "evidence": "Four assert.throws calls in the replace-gated test each exercise a distinct diverged artifact; the focused suite passed with all of them present.",
+      "result": "passed"
+    },
+    {
+      "assertion": "The installed copy is independent: editing it does not alter the checkout.",
+      "kind": "test",
+      "evidence": "The test compares the checkout SKILL.md bytes before and after editing the installed copy and asserts deep equality; it passed.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": { "status": "DELIVERED" },
+  "unverified": [],
+  "outOfScope": [
+    "Real OpenCode session verification belongs to OC-SMOKE.",
+    "README and plugin metadata updates belong to OC-DOCS."
+  ],
+  "closedRow": "| 5 | `OC-TESTS` | `IMPLEMENTATION` | `NOW` | Extend `scripts/install.test.mjs` for the new target: default untouched, opt-in install paths, `all` membership, `--replace` idempotence, generated command content, transformed agent frontmatter, and a temporary-directory install proving the installed copy is independent. Closes when `node --test scripts/install.test.mjs` passes with the new assertions. | `D-OPENCODE-SUPPORT` REQ-OC-6. |",
+  "notes": [
+    "Two earlier tickets had already added the default-untouched and --target all assertions; this ticket adds dedicated opencode install, command, agent-transform, and independence tests.",
+    "The fixture checkout for these tests contains one skill; the CLI integration test uses the real checkout with three skills."
+  ]
+}

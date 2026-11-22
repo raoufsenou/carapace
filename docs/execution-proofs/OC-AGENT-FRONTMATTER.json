@@ -1,0 +1,149 @@
+{
+  "schema": 1,
+  "taskId": "OC-AGENT-FRONTMATTER",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-22",
+  "requirements": [
+    {
+      "id": "REQ-OC-4-FRONTMATTER",
+      "statement": "OpenCode-installed agents have no name, model, or tools frontmatter and declare mode: subagent.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-4" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "^(name|model|tools):" },
+        { "path": "scripts/install.mjs", "symbol": "'mode: subagent'" },
+        { "path": "scripts/install.mjs", "symbol": "export function toOpenCodeAgent(agent)" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "opencode --standalone debug agents with a temporary config home loaded all six carapace agents with mode=subagent and no model field; a grep scan of installed agent files found no ^name:, ^tools:, or model: inherit.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-4-INHERIT",
+      "statement": "No OpenCode agent sets a model, so every carapace subagent inherits the orchestrator session model.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-4" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "content.includes('model: inherit')" },
+        { "path": "scripts/install.mjs", "symbol": "via frontmatter" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "OpenCode debug agents reported model=<inherit> for all six carapace agents, and the source bodies now say they inherit the parent session model.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-4-PERMISSIONS",
+      "statement": "The five workers deny the subagent action; the advisor denies edit and subagent.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-4" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "const OPENCODE_ADVISOR = 'carapace-advisor'" },
+        { "path": "scripts/install.mjs", "symbol": "'  - action: subagent'" },
+        { "path": "scripts/install.mjs", "symbol": "'  - action: edit'" },
+        { "path": "scripts/install.mjs", "symbol": "'    effect: deny'" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "OpenCode debug agents reported deny=['subagent', ...] on all five workers and deny=['edit', 'subagent', ...] on the advisor.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-4-STRIP",
+      "statement": "No Claude-only mcp__carapace__step tool reference or model: inherit wording survives in the installed OpenCode agent output.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-4" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "const OPENCODE_BODY_REPLACEMENTS = [" },
+        { "path": "scripts/install.mjs", "symbol": "content.includes('mcp__carapace__step')" },
+        { "path": "scripts/install.mjs", "symbol": "- **Progress reporting**:" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "A recursive grep across the installed OpenCode agents directory for mcp__carapace__step, model: inherit, ^name:, ^tools:, and 'via frontmatter' returned no matches; the progress-reporting bullets and model wording were rewritten in the install output only.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        },
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-4-SOURCE",
+      "statement": "Source agents keep frontmatter model: inherit per REQ-MI-1; only the OpenCode install output omits it.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-4" },
+      "evidence": [
+        { "path": "agents/carapace-advisor.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-heavy.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-fable.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-careful.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-medium.md", "symbol": "model: inherit" },
+        { "path": "agents/carapace-light.md", "symbol": "model: inherit" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "All six source agent files still contain the model: inherit frontmatter line, and the transform copies them without modification for Claude, Codex, and Cursor.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "scripts/install.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node scripts/install.mjs --target opencode",
+      "implementation": "scripts/install.mjs#agents: agents.map(toOpenCodeAgent)",
+      "consumer": "scripts/install.mjs#installSkillAndAgentHarness"
+    },
+    {
+      "entryPoint": "OpenCode agent discovery from the config home",
+      "implementation": "scripts/install.mjs#mode: subagent",
+      "consumer": "scripts/install.mjs#OPENCODE_BODY_REPLACEMENTS"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "A worker cannot re-delegate: every OpenCode worker definition denies the subagent action.",
+      "kind": "inspection",
+      "evidence": "OpenCode debug agents showed deny=['subagent', ...] on all five workers; OpenCode's default subagent nesting depth is one, so the Claude nested-sonnet-to-Argon path has no route in this harness.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Deprecated or Claude-only fields cannot be shipped silently: the transform rejects its own output when they survive.",
+      "kind": "inspection",
+      "evidence": "The guard in toOpenCodeAgent throws when name/model/tools frontmatter, mcp__carapace__step, or model: inherit remains; the temp-install grep scan found none, and the focused installer suite passed.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": { "status": "DELIVERED" },
+  "unverified": [],
+  "outOfScope": [
+    "Command file generation (REQ-OC-3) belongs to OC-COMMAND-AND-SKILL.",
+    "SKILL.md harness-neutral wording (REQ-OC-5) belongs to OC-COMMAND-AND-SKILL.",
+    "Installer test expansion and documentation (REQ-OC-6) belong to OC-TESTS and OC-DOCS."
+  ],
+  "closedRow": "| 3 | `OC-AGENT-FRONTMATTER` | `IMPLEMENTATION` | `NOW` | Transform `agents/*.md` into OpenCode V2 agent files at install time: omit `model` to inherit the orchestrator's live model, drop `tools:` and `mcp__carapace__step`, add `mode: subagent`, add V2 `permissions` denying `subagent` to the five workers and `edit` to the advisor. Closes when installed agents load in OpenCode with no invalid or deprecated fields and worker re-delegation is denied. | `D-OPENCODE-SUPPORT` REQ-OC-4; `D-MODEL-INHERIT`. |",
+  "notes": [
+    "The advisor also denies subagent, beyond the ticket's edit deny, to match REQ-MI-3: only the orchestrator spawns carapace agents.",
+    "Body rewrites are confined to the OpenCode install output; source agent files are untouched."
+  ]
+}

@@ -1,0 +1,123 @@
+{
+  "schema": 1,
+  "taskId": "OC-DOCS",
+  "taskKind": "DOCUMENTATION",
+  "outcome": "DOCUMENTED",
+  "completedAt": "2026-11-22",
+  "requirements": [
+    {
+      "id": "REQ-OC-6-INSTALL-DOCS",
+      "statement": "README describes the four install targets, the opt-in opencode command, drop-in config directories, and no opencode.json edits.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "README.md", "symbol": "## Install for Claude Code, Codex, Cursor, and OpenCode" },
+        { "path": "README.md", "symbol": "# Or install only OpenCode:" },
+        { "path": "README.md", "symbol": "# Or install into all four:" },
+        { "path": "README.md", "symbol": "OpenCode receives drop-in directories under its config home" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The install section names all four targets, shows --target opencode and --target all, and describes the skills/agents/commands drop-ins plus the generated command and V2 agent transform.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-6-COMMAND-AND-CONTENTS",
+      "statement": "README explains /carapace availability by harness and how agents inherit the orchestrator model without re-delegation.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "README.md", "symbol": "the command is a generated `commands/carapace.md` that loads the `carapace` skill" },
+        { "path": "README.md", "symbol": "OpenCode installs transform the defs to V2 with `mode: subagent`" },
+        { "path": "README.md", "symbol": "suggested action, or `Tab`-completed action where suggestions exist" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The command-surface and agents sections match the implemented installer behavior and avoid claiming Tab suggestions in OpenCode.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-6-NON-GOAL",
+      "statement": "Docs make no HUD-parity claim and state that the Claude Code UI is not ported to the other harnesses.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": "README.md", "symbol": "— Claude Code only" },
+        { "path": "README.md", "symbol": "are not ported to Codex, Cursor, or OpenCode" },
+        { "path": ".claude-plugin/plugin.json", "symbol": "Claude Code adds the live AbovePrompt progress bar" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The HUD section is explicitly labelled Claude Code only and states the fallback used by Codex, Cursor, and OpenCode; the plugin description separates the Claude-only UI from the functional support.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-6-MANIFEST",
+      "statement": "Plugin metadata mentions OpenCode and the other opt-in harnesses.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-6" },
+      "evidence": [
+        { "path": ".claude-plugin/plugin.json", "symbol": "\"opencode\"" },
+        { "path": ".claude-plugin/plugin.json", "symbol": "\"codex\"" },
+        { "path": ".claude-plugin/plugin.json", "symbol": "\"cursor\"" }
+      ],
+      "verification": [
+        {
+          "kind": "static",
+          "command": "node -e \"JSON.parse(require('fs').readFileSync('.claude-plugin/plugin.json','utf8'))\"",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "README.md",
+    ".claude-plugin/plugin.json"
+  ],
+  "integration": [
+    {
+      "entryPoint": "User reading install documentation",
+      "implementation": "README.md#Or install only OpenCode:",
+      "consumer": "scripts/install.mjs#const USAGE = 'Usage: node scripts/install.mjs [--replace] [--target all|claude|codex|cursor|opencode]'"
+    },
+    {
+      "entryPoint": "Claude plugin metadata",
+      "implementation": ".claude-plugin/plugin.json#\"opencode\"",
+      "consumer": "README.md#Install for Claude Code, Codex, Cursor, and OpenCode"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Documentation does not overclaim UI parity.",
+      "kind": "inspection",
+      "evidence": "The HUD section is labelled Claude Code only and contains an explicit sentence that the hooks are not ported; no README sentence promises the progress bar, Agents panel, or Tab suggestions in OpenCode.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "TRACKED",
+    "taskIds": [
+      "OC-INSTALLER-TARGET",
+      "OC-AGENT-FRONTMATTER",
+      "OC-COMMAND-AND-SKILL",
+      "OC-TESTS"
+    ]
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Product behavior changes: documentation only, tracked by the implementation tickets above."
+  ],
+  "closedRow": "| 6 | `OC-DOCS` | `DOCUMENTATION` | `NOW` | Update `README.md` install, command, and contents sections plus `.claude-plugin/plugin.json` description and keywords for OpenCode and its explicit UI non-goal. Closes when the docs match installed behavior and make no HUD-parity claim. | `D-OPENCODE-SUPPORT` REQ-OC-6; non-goal. |",
+  "notes": [
+    "Documentation follows the implemented install paths and the D-OPENCODE-SUPPORT non-goal; no new behavior was introduced."
+  ]
+}

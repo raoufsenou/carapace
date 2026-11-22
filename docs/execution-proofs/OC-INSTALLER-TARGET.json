@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "taskId": "OC-INSTALLER-TARGET",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-22",
+  "requirements": [
+    {
+      "id": "REQ-OC-1-ACCEPT",
+      "statement": "The CLI accepts opencode as an install target, includes it in --target all, and leaves it out of the bare default install.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-1" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "const TARGET_NAMES = ['claude', 'codex', 'cursor', 'opencode']" },
+        { "path": "scripts/install.mjs", "symbol": "[--target all|claude|codex|cursor|opencode]" },
+        { "path": "scripts/install.test.mjs", "symbol": "targets: ['claude', 'codex', 'cursor', 'opencode']" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.match(second.stdout, /" },
+        { "path": "scripts/install.test.mjs", "symbol": "assert.equal(existsSync(env.OPENCODE_CONFIG_HOME), false)" }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        },
+        {
+          "kind": "inspection",
+          "evidence": "A temp-home CLI run with --target opencode printed [opencode] Installed lines; the bare default run printed only [claude] and created no OpenCode config home; a --target all run printed [opencode] lines.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-1-DISPATCH",
+      "statement": "The opencode target dispatches through the shared skills-and-agents harness installer with an explicit opencodeHome override.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-1" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "target === 'opencode'" },
+        { "path": "scripts/install.mjs", "symbol": "installSkillAndAgentHarness({ target: 'opencode', home: opencodeHome, skills, agents, replace })" },
+        { "path": "scripts/install.mjs", "symbol": "opencodeHome = defaultOpenCodeHome()" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The dispatch branch passes opencodeHome to installSkillAndAgentHarness; the temp-home run installed three skill folders and six agent files, the same contract Codex and Cursor use.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-2-DROPINS",
+      "statement": "OpenCode artifacts are installed only as drop-in directories under the config home: skills/ and agents/.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-2" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "const skillsRoot = join(home, 'skills')" },
+        { "path": "scripts/install.mjs", "symbol": "const agentsRoot = join(home, 'agents')" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "The temp-home install produced config/skills/{app-slop-audit,carapace,execution-plan-integrity} and config/agents/{six carapace-*.md files} and no other roots.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-2-NOCONFIG",
+      "statement": "No opencode.json or opencode.jsonc is created or edited by the install.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-2" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "no opencode.json is written" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "After the temp-home install, neither CONFIG/opencode.json nor CONFIG/opencode.jsonc existed (both test -e checks returned false).",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    },
+    {
+      "id": "REQ-OC-2-HOME",
+      "statement": "The OpenCode config home resolves from OPENCODE_CONFIG_HOME, then XDG_CONFIG_HOME, then ~/.config/opencode.",
+      "source": { "path": "docs/execution-plan.md", "anchor": "REQ-OC-2" },
+      "evidence": [
+        { "path": "scripts/install.mjs", "symbol": "if (process.env.OPENCODE_CONFIG_HOME) return process.env.OPENCODE_CONFIG_HOME" },
+        { "path": "scripts/install.mjs", "symbol": "join(process.env.XDG_CONFIG_HOME, 'opencode')" },
+        { "path": "scripts/install.mjs", "symbol": "join(homedir(), '.config', 'opencode')" },
+        { "path": "scripts/install.test.mjs", "symbol": "OPENCODE_CONFIG_HOME: join(root, 'opencode')" }
+      ],
+      "verification": [
+        {
+          "kind": "inspection",
+          "evidence": "defaultOpenCodeHome is called as the opencodeHome default in install(); the CLI test pins OPENCODE_CONFIG_HOME to a temp root so --target all cannot write to the real config home.",
+          "result": "passed",
+          "checkedAt": "2026-11-22"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "scripts/install.mjs",
+    "scripts/install.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node scripts/install.mjs --target opencode",
+      "implementation": "scripts/install.mjs#target === 'opencode'",
+      "consumer": "scripts/install.mjs#installSkillAndAgentHarness({ target: 'opencode', home: opencodeHome, skills, agents, replace })"
+    },
+    {
+      "entryPoint": "node scripts/install.mjs --target all",
+      "implementation": "scripts/install.mjs#const TARGET_NAMES = ['claude', 'codex', 'cursor', 'opencode']",
+      "consumer": "scripts/install.test.mjs#\\[opencode\\] Installed carapace"
+    },
+    {
+      "entryPoint": "OPENCODE_CONFIG_HOME environment override",
+      "implementation": "scripts/install.mjs#if (process.env.OPENCODE_CONFIG_HOME) return process.env.OPENCODE_CONFIG_HOME",
+      "consumer": "scripts/install.test.mjs#OPENCODE_CONFIG_HOME: join(root, 'opencode')"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "An unknown target is rejected, so opencode is an explicit target rather than an accepted arbitrary string.",
+      "kind": "inspection",
+      "evidence": "scripts/install.test.mjs asserts commandPlan(['--target', 'vscode']) throws the USAGE error; the focused suite passed with that assertion still present.",
+      "result": "passed"
+    },
+    {
+      "assertion": "A locally modified installed skill is refused and the checkout copy stays byte-identical.",
+      "kind": "inspection",
+      "evidence": "In the temp home, editing config/skills/carapace/SKILL.md made the next --target opencode run fail with 'differs from this checkout'; cmp against the pre-run copy of skills/carapace/SKILL.md confirmed the checkout file was unchanged; --replace then restored it.",
+      "result": "passed"
+    },
+    {
+      "assertion": "The bare default install does not create an OpenCode config home.",
+      "kind": "inspection",
+      "evidence": "The temp-home CLI run with OPENCODE_CONFIG_HOME set created no such directory; scripts/install.test.mjs asserts existsSync(env.OPENCODE_CONFIG_HOME) is false and passed.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": { "status": "DELIVERED" },
+  "unverified": [],
+  "outOfScope": [
+    "Command file generation (REQ-OC-3) belongs to OC-COMMAND-AND-SKILL; no commands/ file is created by this ticket.",
+    "Agent frontmatter transform (REQ-OC-4) belongs to OC-AGENT-FRONTMATTER; installed agents are copied verbatim here.",
+    "Claude Code HUD, Agents panel, Tab suggestions, and progress MCP tools (D-OPENCODE-SUPPORT non-goal)."
+  ],
+  "closedRow": "| 2 | `OC-INSTALLER-TARGET` | `IMPLEMENTATION` | `NOW` | Add the `opencode` target to `scripts/install.mjs`: target name, `opencodeHome` override, harness dispatch, drop-in roots under the OpenCode config home, and USAGE text. Default stays Claude-only; `all` includes `opencode`. Closes when a temporary-home `--target opencode` install produces independent skill and agent copies and `--target all` reports `opencode`. | `D-OPENCODE-SUPPORT` REQ-OC-1, REQ-OC-2. |",
+  "notes": [
+    "Verified against a temporary config home; the checkout itself was not modified by the install commands.",
+    "Command-file generation and agent frontmatter transform are intentionally deferred to OC-COMMAND-AND-SKILL and OC-AGENT-FRONTMATTER."
+  ]
+}
