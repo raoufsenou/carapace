@@ -48,6 +48,7 @@ function demo() {
     claudeHome: join(root, 'claude'),
     codexHome: join(root, 'codex'),
     cursorHome: join(root, 'cursor'),
+    opencodeHome: join(root, 'opencode'),
   }
 }
 
@@ -56,7 +57,7 @@ test('commandPlan parses --replace and --target and rejects unknown flags', () =
   assert.deepEqual(commandPlan(['--replace']), { replace: true, targets: ['claude'] })
   assert.deepEqual(commandPlan(['--target', 'codex,cursor']), { replace: false, targets: ['codex', 'cursor'] })
   assert.deepEqual(commandPlan(['--target', 'claude', '--replace']), { replace: true, targets: ['claude'] })
-  assert.deepEqual(commandPlan(['--target', 'all']), { replace: false, targets: ['claude', 'codex', 'cursor'] })
+  assert.deepEqual(commandPlan(['--target', 'all']), { replace: false, targets: ['claude', 'codex', 'cursor', 'opencode'] })
   assert.throws(() => commandPlan(['--force']), /Usage: node scripts\/install\.mjs/)
   assert.throws(() => commandPlan(['--target', 'vscode']), /Usage: node scripts\/install\.mjs/)
   assert.throws(() => commandPlan(['--replace', '--replace']), /Usage: node scripts\/install\.mjs/)
@@ -122,15 +123,17 @@ test('CLI defaults to Claude Code and installs other harnesses only when targete
     CLAUDE_HOME: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
     CURSOR_HOME: join(root, 'cursor'),
+    OPENCODE_CONFIG_HOME: join(root, 'opencode'),
   }
   const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env })
 
   const first = run()
   assert.equal(first.status, 0, first.stderr)
   assert.match(first.stdout, /\[claude\] Installed carapace@carapace/)
-  assert.doesNotMatch(first.stdout, /\[(?:codex|cursor)\]/)
+  assert.doesNotMatch(first.stdout, /\[(?:codex|cursor|opencode)\]/)
   assert.equal(existsSync(env.CODEX_HOME), false)
   assert.equal(existsSync(env.CURSOR_HOME), false)
+  assert.equal(existsSync(env.OPENCODE_CONFIG_HOME), false)
 
   const optedIn = run('--target', 'codex,cursor')
   assert.equal(optedIn.status, 0, optedIn.stderr)
@@ -163,6 +166,94 @@ test('CLI defaults to Claude Code and installs other harnesses only when targete
   assert.match(second.stdout, /\[claude\] carapace@carapace .* already matches this checkout/)
   assert.match(second.stdout, /\[codex\] carapace .* already matches this checkout/)
   assert.match(second.stdout, /\[cursor\] carapace .* already matches this checkout/)
+  assert.match(second.stdout, /\[opencode\] Installed carapace /)
 
   assert.equal(run('--bad-flag').status, 2)
+})
+
+test('opencode is opt-in and the default install leaves its config home untouched', () => {
+  assert.deepEqual(commandPlan(['--target', 'opencode']), { replace: false, targets: ['opencode'] })
+  const { checkout, claudeHome, codexHome, cursorHome, opencodeHome } = demo()
+  const results = install({ checkout, claudeHome, codexHome, cursorHome, opencodeHome })
+  assert.deepEqual(results.map((result) => [result.target, result.action]), [['claude', 'installed']])
+  assert.equal(existsSync(opencodeHome), false)
+})
+
+test('opencode installs drop-in skills, agents, and a generated command under its config home only', () => {
+  const { checkout, claudeHome, codexHome, cursorHome, opencodeHome } = demo()
+  const results = install({ checkout, claudeHome, codexHome, cursorHome, opencodeHome, targets: ['opencode'] })
+  assert.deepEqual(results.map((result) => [result.target, result.action]), [
+    ['opencode', 'installed'],
+    ['opencode', 'installed'],
+  ])
+  assert.deepEqual(readdirSync(join(opencodeHome, 'skills')).sort(), ['carapace'])
+  assert.deepEqual(readdirSync(join(opencodeHome, 'agents')).sort(), [
+    'carapace-advisor.md',
+    'carapace-heavy.md',
+  ])
+  assert.deepEqual(readdirSync(join(opencodeHome, 'commands')), ['carapace.md'])
+  assert.equal(existsSync(join(opencodeHome, 'opencode.json')), false)
+  assert.equal(existsSync(join(opencodeHome, 'opencode.jsonc')), false)
+  assert.equal(existsSync(claudeHome), false)
+  assert.equal(existsSync(codexHome), false)
+  assert.equal(existsSync(cursorHome), false)
+
+  const command = readFileSync(join(opencodeHome, 'commands', 'carapace.md'), 'utf8')
+  assert.match(command, /@carapace/)
+  assert.match(command, /\$ARGUMENTS/)
+})
+
+test('opencode agent output drops Claude fields and permissions deny re-delegation', () => {
+  const { checkout, opencodeHome } = demo()
+  write(
+    checkout,
+    'agents/carapace-heavy.md',
+    '---\nname: carapace-heavy\nmodel: inherit\ndescription: Heavy.\ntools: Read, mcp__carapace__step\n---\n\n' +
+      '- **Model inheritance & no re-delegation**: You run on the orchestrator\'s live model via frontmatter `model: inherit`.\n' +
+      '- **Progress reporting**: Call `mcp__carapace__step` after each step.\n',
+  )
+  install({ checkout, opencodeHome, targets: ['opencode'] })
+
+  const source = readFileSync(join(checkout, 'agents/carapace-heavy.md'), 'utf8')
+  assert.match(source, /^model: inherit$/m)
+  const worker = readFileSync(join(opencodeHome, 'agents', 'carapace-heavy.md'), 'utf8')
+  assert.doesNotMatch(worker, /^(name|model|tools):/m)
+  assert.doesNotMatch(worker, /mcp__carapace__step|model: inherit|via frontmatter/)
+  assert.match(worker, /^mode: subagent$/m)
+  assert.match(worker, /action: subagent/)
+  assert.match(worker, /effect: deny/)
+  assert.match(worker, /because OpenCode subagents inherit the parent session model/)
+
+  const advisor = readFileSync(join(opencodeHome, 'agents', 'carapace-advisor.md'), 'utf8')
+  assert.match(advisor, /action: edit/)
+  assert.match(advisor, /action: subagent/)
+})
+
+test('opencode command and agents are replace-gated and installed copies stay independent', () => {
+  const { checkout, opencodeHome } = demo()
+  install({ checkout, opencodeHome, targets: ['opencode'] })
+  const sourceSkill = readFileSync(join(checkout, 'skills', 'carapace', 'SKILL.md'))
+
+  write(opencodeHome, 'commands/carapace.md', 'hand edited\n')
+  assert.throws(
+    () => install({ checkout, opencodeHome, targets: ['opencode'] }),
+    /carapace\.md \(changed\)[\s\S]*Rerun with --replace/,
+  )
+  install({ checkout, opencodeHome, targets: ['opencode'], replace: true })
+  write(opencodeHome, 'agents/carapace-heavy.md', 'hand edited\n')
+  assert.throws(
+    () => install({ checkout, opencodeHome, targets: ['opencode'] }),
+    /carapace-heavy\.md \(changed\)[\s\S]*Rerun with --replace/,
+  )
+  install({ checkout, opencodeHome, targets: ['opencode'], replace: true })
+  write(opencodeHome, 'skills/carapace/SKILL.md', 'hand edited\n')
+  assert.throws(
+    () => install({ checkout, opencodeHome, targets: ['opencode'] }),
+    /SKILL\.md \(changed\)[\s\S]*Rerun with --replace/,
+  )
+  assert.deepEqual(readFileSync(join(checkout, 'skills', 'carapace', 'SKILL.md')), sourceSkill)
+
+  install({ checkout, opencodeHome, targets: ['opencode'], replace: true })
+  const current = install({ checkout, opencodeHome, targets: ['opencode'] })
+  assert.deepEqual(current.map((result) => result.action), ['current', 'current'])
 })

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-// Installs the carapace plugin into Claude Code (~/.claude) by default, with Codex and Cursor opt-in.
+// Installs the carapace plugin into Claude Code (~/.claude) by default, with Codex, Cursor, and OpenCode opt-in.
+// OpenCode receives drop-in skills and agents under its config home; no opencode.json is written.
 // Existing installs that differ from this checkout are refused unless --replace is passed.
 // Tests: node --test scripts/install.test.mjs
 
@@ -22,9 +23,9 @@ import { fileURLToPath } from 'node:url'
 
 const CHECKOUT = fileURLToPath(new URL('..', import.meta.url))
 const SKILL_PARTS = ['SKILL.md', 'agents', 'assets', 'references']
-const TARGET_NAMES = ['claude', 'codex', 'cursor']
+const TARGET_NAMES = ['claude', 'codex', 'cursor', 'opencode']
 const DEFAULT_TARGET_NAMES = ['claude']
-const USAGE = 'Usage: node scripts/install.mjs [--replace] [--target all|claude|codex|cursor]'
+const USAGE = 'Usage: node scripts/install.mjs [--replace] [--target all|claude|codex|cursor|opencode]'
 
 export function commandPlan(args) {
   let replace = false
@@ -198,6 +199,92 @@ function installAgentFile({ agent, agentsRoot, replace }) {
   writeFileSync(temp, agent.content)
   renameSync(temp, destination)
   return { kind: 'agent', name: agent.name, destination, action: 'installed', changes: [] }
+}
+
+const OPENCODE_ADVISOR = 'carapace-advisor'
+// Each entry must be found in the source body. A changed upstream phrase fails the install loudly
+// instead of shipping an OpenCode agent that still talks about Claude-only tools or fields.
+const OPENCODE_BODY_REPLACEMENTS = [
+  ["You run on the orchestrator's live model via frontmatter `model: inherit`.", 'You inherit the orchestrator\'s live model because OpenCode subagents inherit the parent session model.'],
+  ['via `model: inherit`.', 'because OpenCode subagents inherit the parent session model.'],
+  ['Your tool allowlist excludes `Agent`, so re-delegation is impossible.', 'OpenCode permissions deny the `subagent` action, so re-delegation is impossible.'],
+  [
+    'tell the orchestrator to spawn `carapace:*` agents **without** an Agent `model` parameter (omit it entirely) so workers inherit the orchestrator session model.',
+    'tell the orchestrator to spawn `carapace:*` subagents **without** a `model` override so workers inherit the orchestrator session model.',
+  ],
+]
+
+export function toOpenCodeAgent(agent) {
+  const text = agent.content.toString('utf8')
+  const parts = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text)
+  if (!parts) throw new Error(`${agent.path} has no Markdown frontmatter block`)
+  const frontmatter = parts[1].split('\n').filter((line) => !/^(name|model|tools):/.test(line))
+  const permissions = agent.name === OPENCODE_ADVISOR
+    ? [
+        '  - action: edit',
+        '    resource: "*"',
+        '    effect: deny',
+        '  - action: subagent',
+        '    resource: "*"',
+        '    effect: deny',
+      ]
+    : ['  - action: subagent', '    resource: "*"', '    effect: deny']
+
+  let body = parts[2]
+  for (const [from, to] of OPENCODE_BODY_REPLACEMENTS) {
+    body = body.replaceAll(from, to)
+  }
+  const lines = body.split('\n')
+  const transformedBody = lines.filter((line) => !(line.startsWith('- **Progress reporting**:') && line.includes('mcp__carapace__step'))).join('\n')
+  const content = `---\n${[...frontmatter, 'mode: subagent', 'permissions:', ...permissions].join('\n')}\n---\n${transformedBody}`
+  if (/^(name|model|tools):/m.test(content.split('---\n')[1]) || content.includes('mcp__carapace__step') || content.includes('model: inherit')) {
+    throw new Error(`${agent.path} transform left deprecated or Claude-only fields in the OpenCode output`)
+  }
+  return { ...agent, content: Buffer.from(content, 'utf8') }
+}
+
+const OPENCODE_COMMAND = `---
+description: Carapace orchestration - execution plans, audits, and worker batches
+---
+
+Load the \`@carapace\` skill and follow it for this request: $ARGUMENTS
+`
+
+const openCodeCommandPath = (home) => join(home, 'commands', 'carapace.md')
+
+function checkOpenCodeCommand(home, replace) {
+  const destination = openCodeCommandPath(home)
+  const present = lstatSync(destination, { throwIfNoEntry: false })
+  if (!present) return false
+  if (!present.isFile()) {
+    throw new Error(`${destination} is not a file: move it away to install the carapace command there`)
+  }
+  const changed = !readFileSync(destination).equals(Buffer.from(OPENCODE_COMMAND))
+  if (changed && !replace) {
+    throw new Error(`${destination} differs from this checkout:\n- carapace.md (changed)\nRerun with --replace to replace it.`)
+  }
+  return changed
+}
+
+function installOpenCodeCommand({ home, replace, changed }) {
+  const destination = openCodeCommandPath(home)
+  if (!changed && existsSync(destination)) {
+    const item = { kind: 'command', name: 'carapace', destination, action: 'current', changes: [] }
+    return { target: 'opencode', home, action: 'current', items: [item] }
+  }
+  mkdirSync(dirname(destination), { recursive: true })
+  const temp = join(dirname(destination), `.carapace-install-${process.pid}-${Date.now()}.tmp`)
+  writeFileSync(temp, OPENCODE_COMMAND)
+  renameSync(temp, destination)
+  const action = changed ? 'replaced' : 'installed'
+  const item = {
+    kind: 'command',
+    name: 'carapace',
+    destination,
+    action,
+    changes: changed ? ['carapace.md (changed)'] : [],
+  }
+  return { target: 'opencode', home, action, items: [item] }
 }
 
 function installSkillAndAgentHarness({ target, home, skills, agents, replace }) {
@@ -420,11 +507,19 @@ function installClaudeHome({ checkout, claudeHome, replace }) {
   }
 }
 
+function defaultOpenCodeHome() {
+  if (process.env.OPENCODE_CONFIG_HOME) return process.env.OPENCODE_CONFIG_HOME
+  return process.env.XDG_CONFIG_HOME
+    ? join(process.env.XDG_CONFIG_HOME, 'opencode')
+    : join(homedir(), '.config', 'opencode')
+}
+
 export function install({
   checkout = CHECKOUT,
   claudeHome = process.env.CLAUDE_HOME || process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
   codexHome = process.env.CODEX_HOME || join(homedir(), '.codex'),
   cursorHome = process.env.CURSOR_HOME || join(homedir(), '.cursor'),
+  opencodeHome = defaultOpenCodeHome(),
   replace = false,
   targets = DEFAULT_TARGET_NAMES,
 } = {}) {
@@ -448,6 +543,16 @@ export function install({
       results.push(installSkillAndAgentHarness({ target: 'codex', home: codexHome, skills, agents, replace }))
     } else if (target === 'cursor') {
       results.push(installSkillAndAgentHarness({ target: 'cursor', home: cursorHome, skills, agents, replace }))
+    } else if (target === 'opencode') {
+      const commandChanged = checkOpenCodeCommand(opencodeHome, replace)
+      results.push(installSkillAndAgentHarness({
+        target: 'opencode',
+        home: opencodeHome,
+        skills,
+        agents: agents.map(toOpenCodeAgent),
+        replace,
+      }))
+      results.push(installOpenCodeCommand({ home: opencodeHome, replace, changed: commandChanged }))
     } else {
       throw new Error(`Unknown target: ${target}`)
     }
