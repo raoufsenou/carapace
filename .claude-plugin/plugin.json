@@ -1,7 +1,7 @@
 {
   "name": "carapace",
   "version": "2.0.0",
-  "description": "Self-contained Claude Code plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, six carapace-* subagents, live AbovePrompt progress bar, Agents side panel, and automatic next-step prompt suggestions.",
+  "description": "Self-contained plugin bundling carapace orchestration, execution-plan-integrity, app-slop-audit, and six carapace-* subagents. Claude Code adds the live AbovePrompt progress bar, Agents side panel, and next-step suggestions; Codex, Cursor, and OpenCode get the functional skills, agents, and (for OpenCode) the /carapace command.",
   "author": { "name": "raouf" },
   "license": "MIT",
   "keywords": [
@@ -12,7 +12,10 @@
     "progress",
     "execution-plan-integrity",
     "app-slop-audit",
-    "carapace"
+    "carapace",
+    "opencode",
+    "codex",
+    "cursor"
   ],
   "types": "./types/index.d.ts",
   "userConfig": {
