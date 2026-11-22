@@ -32,15 +32,15 @@ Task from the user: $ARGUMENTS
    - Never read, print, hash, or inspect `.env*`, `.npmrc`, or secret values. When preparing a worktree that needs ignored local env files, copy them with `cp` without reading or printing their contents.
    - Kill any dev server, watcher, or background process you started the moment its check returns.
 4. **Worker and advisor availability**:
-   - Subagents must exist: `carapace-advisor` (read-only state researcher, fan-out feasibility analyzer, and prompt generator) and the five execution workers `carapace-fable`, `carapace-heavy`, `carapace-careful`, `carapace-medium`, `carapace-light` (or namespaced as `carapace:carapace-*`).
+   - Subagents must exist: `carapace-advisor` (read-only state researcher, fan-out feasibility analyzer, and prompt generator) and the five execution workers `carapace-fable`, `carapace-heavy`, `carapace-careful`, `carapace-medium`, `carapace-light` (namespaced as `carapace:carapace-*` in Claude Code; plain `carapace-*` IDs in OpenCode, Codex, and Cursor).
 5. **Model inheritance (`D-MODEL-INHERIT`)**:
-   - Every `carapace:*` advisor/worker runs on **exactly the orchestrator session's live model** (`default` / `auto` / whatever the maintainer selected). Agent defs keep `model: inherit`.
-   - When calling `Agent` for any `carapace:*` type, **omit the `model` parameter entirely**. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model override — those pins break inheritance (and `inherit` is not even a valid Agent `model` enum value).
-   - Only the orchestrator spawns `carapace:*` agents. Workers' tool allowlists exclude `Agent`, so they cannot re-delegate.
+   - Every `carapace:*` advisor/worker runs on **exactly the orchestrator session's live model** (`default` / `auto` / whatever the maintainer selected). Claude Code agent defs keep `model: inherit`.
+   - **Never pass a model override** on a `carapace:*` spawn. In Claude Code, call `Agent` and omit its `model` parameter entirely — never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other override, because those pins break inheritance and `inherit` is not even a valid Agent `model` enum value. In OpenCode, call the `subagent` tool (agent ID, `description`, full `prompt`) with no model field: OpenCode subagents inherit the parent session model. In Codex and Cursor, use the harness's native delegation with no model override.
+   - Only the orchestrator spawns `carapace:*` agents. Workers cannot re-delegate: Claude Code workers' `tools:` allowlists exclude `Agent`; OpenCode workers carry a `subagent: deny` permission; Codex and Cursor rely on this prompt rule.
 
-## Live view (`mcp__carapace__progress`, `TodoWrite` / `update_plan`, & `status.mjs`)
+## Live view (progress tools, harness checklists, & `status.mjs`)
 
-The progress bar (`mcp__carapace__progress`), harness checklist (`TodoWrite` / `update_plan`), and `status.mjs` output are a **live view for the user, never a second queue**: the canonical execution register stays the record.
+The progress bar (`mcp__carapace__progress`), harness checklists, and `status.mjs` output are a **live view for the user, never a second queue**: the canonical execution register stays the record. Every later reference to `mcp__carapace__progress` or `mcp__carapace__step` in this playbook follows the harness branch below; in harnesses without those tools, skip the call rather than treating it as a failure.
 
 - **In Claude Code (`mcp__carapace__progress` available; load via ToolSearch `select:mcp__carapace__progress` if deferred)**:
   - Do **not** call `mcp__carapace__progress` on read-only status checks (bare `/carapace`). Call it only when executing a workflow (`setup`, `audit`, `decide`, `run`).
@@ -49,8 +49,9 @@ The progress bar (`mcp__carapace__progress`), harness checklist (`TodoWrite` / `
   - Switch `phase` to `"review"` while verifying proofs, ownership, and diffs; increment `done` each time a step/member is accepted and closed.
   - Call with `finished: true` and `nextPrompt` (the recommended next `/carapace ...` command from `status.mjs --json`, such as `/carapace run <NEXT-ID>`, `/carapace decide <app>`, `/carapace reconcile shared findings`, or `/carapace setup` — never `/carapace Execute ...`) when the requested run closes, so the prompt composer's Tab-suggestion and the Agents panel's `Next →` button stay current.
   - **Broken-present (fail closed)**: If `mcp__carapace__progress` or `mcp__carapace__step` returns an error containing `no tool.call hook answered` (tool still listed in the catalog, but the hooks-worker did not answer), treat both tools as broken for the rest of the session: stop calling them, do **not** retry or spam, and fall back to the harness checklist (`TodoWrite` in Cursor, `update_plan` in Codex) plus the `status.mjs` footer. Listed ≠ working.
-- **In Codex and Cursor (where Claude Code's runtime SDK tools `mcp__carapace__progress` / `mcp__carapace__step` are absent)**:
-  - Use the harness's native live checklist (`TodoWrite` in Cursor, `update_plan` in Codex) to keep the active task or batch steps visible above the composer as work progresses.
+- **In Codex, Cursor, and OpenCode (where Claude Code's runtime SDK tools `mcp__carapace__progress` / `mcp__carapace__step` and Agents panel are absent)**:
+  - Use the harness's native live checklist (`TodoWrite` in Cursor, `update_plan` in Codex) to keep the active task or batch steps visible above the composer as work progresses. OpenCode has no equivalent checklist here, so the `status.mjs` footer below is its only progress view.
+  - Never call `mcp__carapace__progress` or `mcp__carapace__step` in these harnesses. They are not "broken-present": they simply do not exist. Do not retry them or wait for them.
   - At the end of the turn, run `node <carapace-skill-path>/assets/status.mjs --root <repo>` and include its two-line output (`Carapace: [████░░] Done/Total (%) · NOW: <ID>` and `Next → /carapace ...`) at the bottom of your closing report.
 
 ---
@@ -65,15 +66,15 @@ node <carapace-skill-path>/assets/status.mjs --root <repo> --json [--prompt "<$A
 
 ### Form 1: Bare `/carapace` (or `next` / `prompt` / `advise`) — Interactive Control Menu & Advisor
 When `$ARGUMENTS` is empty (or asks what to do next / asks for a prompt or fan-out analysis without authorizing immediate execution):
-1. Inspect the JSON output from `status.mjs --root <repo> --json`. **When the user asks for `advise`, `prompt`, a fan-out feasibility analysis, or a copy-ready orchestration prompt, always spawn `carapace-advisor` (`carapace:carapace-advisor`)** to inspect cross-file path overlap, shared prerequisites, and worktree readiness and generate the orchestration prompt.
+1. Inspect the JSON output from `status.mjs --root <repo> --json`. **When the user asks for `advise`, `prompt`, a fan-out feasibility analysis, or a copy-ready orchestration prompt, always spawn `carapace-advisor` (`carapace:carapace-advisor` in Claude Code, plain `carapace-advisor` elsewhere)** to inspect cross-file path overlap, shared prerequisites, and worktree readiness and generate the orchestration prompt.
 2. Present:
    - **Live State Snapshot**: Progress bar, `NOW` pointer, any interrupted step or active worktrees on disk, and any unreconciled or undecided `docs/audit/` rounds.
    - **Numbered Options Menu**: List the tailored `options` from `status.mjs --json`, always placing the recommended action first as **`1. ... (Recommended)`** with its exact command (`command`).
    - When multiple `QUEUED` steps exist or fan-out is relevant, state the **Fan-Out Feasibility Verdict** (`FAN-OUT READY`, `HYBRID: SEQUENTIAL FIRST -> FAN-OUT BATCH`, `SEQUENTIAL ONLY`, or `BATCH RESUME`) and include the copy-ready prompt from `carapace-advisor`.
-3. **Stop** and wait for the user's choice (or `Tab` + `Enter`). Never mutate files or call `mcp__carapace__progress` on a bare `/carapace` call.
+3. **Stop** and wait for the user's choice (or `Tab` + `Enter` where those suggestions exist). Never mutate files or call `mcp__carapace__progress` (Claude Code only) on a bare `/carapace` call.
 
 ### Form 2: `/carapace <prompt>` — Preflight Conflict Check -> Execute
-When `$ARGUMENTS` contains any instruction (either natural language like `/carapace audit the checkout screens`, `/carapace fix the login timeout`, or a `Tab`-completed action like `/carapace run <ID>`, `/carapace decide <app>`, `/carapace setup`):
+When `$ARGUMENTS` contains any instruction (either natural language like `/carapace audit the checkout screens`, `/carapace fix the login timeout`, or a known action like `/carapace run <ID>`, `/carapace decide <app>`, `/carapace setup`):
 1. Check `preflight` in the output of `node <carapace-skill-path>/assets/status.mjs --root <repo> --json --prompt "<$ARGUMENTS>"`.
 2. **If `preflight.hasConflict` is `true`** (unless the user's prompt explicitly chose one of the conflict resolution options, such as `preempt` or `proceed without`):
    - **Stop before mutating any file.**
@@ -234,8 +235,9 @@ Use when the repository is already set up with `.execution-plan-integrity.json` 
 ### 3. Subagent Roles (`carapace-advisor` & `carapace-*` Workers)
 
 **Model inheritance (`D-MODEL-INHERIT`) — non-negotiable**:
-- Every `carapace:*` spawn **omits** the Agent tool `model` parameter so frontmatter `model: inherit` takes the orchestrator's live model. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model/effort override for a `carapace:*` spawn.
-- Only the orchestrator spawns `carapace:*` workers/advisors. Workers must not re-delegate; their `tools:` allowlists exclude `Agent`.
+- Every `carapace:*` spawn **omits any model override**: in Claude Code, omit the Agent tool `model` parameter so frontmatter `model: inherit` takes the orchestrator's live model; in OpenCode, use the `subagent` tool with no model field so the child inherits the parent session model; in Codex and Cursor, use native delegation without a model override. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model/effort override for a `carapace:*` spawn.
+- Only the orchestrator spawns `carapace:*` workers/advisors. Workers must not re-delegate: Claude Code workers' `tools:` allowlists exclude `Agent`; OpenCode workers carry a `subagent: deny` permission; Codex and Cursor rely on this prompt rule.
+- In Claude Code, spawn workers in the **foreground** so review and close happen in the same turn. OpenCode subagents always run in the background: spawn with the `subagent` tool (`agent` ID, `description` = task title, complete `prompt`), keep working, and review the result when the child reports idle. Codex and Cursor follow their harness's delegation behavior.
 - Match the subagent **role** (not model) to the nature of the task:
 
 | Role | Agent | Use for |
@@ -254,7 +256,7 @@ When working through the plan one task at a time:
 1. **Identify `NOW`**: Read the single `NOW` row in the canonical register, its requirement sources, and (if it is an `app-slop-audit` step) the accepted findings it closes.
 2. **Delegate**:
    - Update `mcp__carapace__progress` (`phase: "delegate"`, `title`, `total`, `done`, `tasks`).
-   - Spawn the chosen `carapace-*` worker via `Agent` in the **foreground** (`run_in_background` omitted or `false`, with `description` = the task's `title`, and **no `model` parameter**) so the orchestrator reviews and closes the step in the same turn without extra background wake-up round-trips. Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
+   - Spawn the chosen `carapace-*` worker through the harness's delegation tool: Claude Code `Agent` in the **foreground** (`run_in_background` omitted or `false`, `description` = the task's `title`, no `model` parameter); OpenCode `subagent` (`agent` ID = worker name, `description` = the task's `title`, complete `prompt`), whose result you review when it reports idle. Never pass a model override in any harness. Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
    - Instruct the worker **not** to edit the canonical execution register document; the orchestrator updates the register after review.
 3. **Adversarial Review & Semantic Close (`execution-plan-integrity` `close` + `app-slop-audit` `apply`)**:
    - Switch `mcp__carapace__progress` `phase` to `"review"`.
@@ -293,7 +295,7 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
      `git worktree add -b <branch> <worktree> <commit>`
    - Install dependencies in each worktree as the project requires (`pnpm install`), and copy any ignored local environment files (`cp`) without reading or printing their contents.
 4. **Update `mcp__carapace__progress` (and `TodoWrite` if requested) & spawn `carapace-*` workers**:
-   - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of worker slices or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per worker/member, matching the `Agent` `description`).
+   - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of worker slices or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per worker/member, matching the delegation `description`).
    - Launch one `carapace-*` worker per slice concurrently in a single message in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll with `sleep` loops; **omit `model` on every spawn**). Each worker brief must state:
      - Its slice/app name, `worktree` path, `branch`, exact owned `paths` (folders or individual files), and ordered member task IDs (`<STEP-ID>`) with their full register rows;
      - The committed audit `toolkit` path, settled audit principles, and the shared-code paths it must not modify;
@@ -339,4 +341,4 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
 Report concisely to the user:
 1. Which register tasks/batches closed and their proof paths, what verification and checker commands ran and their observed output, the current `NOW` pointer (`<TASK-ID>`, `IDLE`, or `NONE`), and which `carapace-*` tiers ran.
 2. **Fan-Out Status (always include when ordered tasks remain)**: State in one line whether the immediate next step(s) in the canonical register must run **sequentially** (naming the shared file overlap, e.g. shared shell/layout/router files, and naming which upcoming step ID opens the next parallel fan-out window) or are **fan-out ready now** (naming the disjoint step IDs that can be batched in parallel worktrees).
-3. **Next Step**: Always end with the deterministic `Next → /carapace ...` recommendation from `status.mjs` matching the updated repository state (`/carapace run <NOW-ID>`, `/carapace decide <app>`, `/carapace reconcile shared findings`, `/carapace setup`, or `/carapace` — never `/carapace Execute ...`) — pass it as `nextPrompt` in your closing `mcp__carapace__progress` call in Claude Code, or print the two-line footer from `node <carapace-skill-path>/assets/status.mjs --root <repo>` in Codex and Cursor.
+3. **Next Step**: Always end with the deterministic `Next → /carapace ...` recommendation from `status.mjs` matching the updated repository state (`/carapace run <NOW-ID>`, `/carapace decide <app>`, `/carapace reconcile shared findings`, `/carapace setup`, or `/carapace` — never `/carapace Execute ...`) — pass it as `nextPrompt` in your closing `mcp__carapace__progress` call in Claude Code, or print the two-line footer from `node <carapace-skill-path>/assets/status.mjs --root <repo>` in Codex, Cursor, and OpenCode.
