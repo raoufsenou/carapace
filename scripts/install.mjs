@@ -202,9 +202,9 @@ function installAgentFile({ agent, agentsRoot, replace }) {
 }
 
 const OPENCODE_ADVISOR = 'carapace-advisor'
-// Each entry must be found in the source body. A changed upstream phrase fails the install loudly
-// instead of shipping an OpenCode agent that still talks about Claude-only tools or fields.
-const OPENCODE_BODY_REPLACEMENTS = [
+// Each entry must match at least once across the agent set. A changed upstream phrase fails the
+// install loudly instead of shipping an OpenCode agent that still talks about Claude-only tools or fields.
+export const OPENCODE_BODY_REPLACEMENTS = [
   ["You run on the orchestrator's live model via frontmatter `model: inherit`.", 'You inherit the orchestrator\'s live model because OpenCode subagents inherit the parent session model.'],
   ['via `model: inherit`.', 'because OpenCode subagents inherit the parent session model.'],
   ['Your tool allowlist excludes `Agent`, so re-delegation is impossible.', 'OpenCode permissions deny the `subagent` action, so re-delegation is impossible.'],
@@ -214,7 +214,7 @@ const OPENCODE_BODY_REPLACEMENTS = [
   ],
 ]
 
-export function toOpenCodeAgent(agent) {
+function transformOpenCodeAgentContent(agent, matched) {
   const text = agent.content.toString('utf8')
   const parts = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(text)
   if (!parts) throw new Error(`${agent.path} has no Markdown frontmatter block`)
@@ -232,15 +232,37 @@ export function toOpenCodeAgent(agent) {
 
   let body = parts[2]
   for (const [from, to] of OPENCODE_BODY_REPLACEMENTS) {
-    body = body.replaceAll(from, to)
+    if (body.includes(from)) {
+      matched?.add(from)
+      body = body.replaceAll(from, to)
+    }
   }
   const lines = body.split('\n')
   const transformedBody = lines.filter((line) => !(line.startsWith('- **Progress reporting**:') && line.includes('mcp__carapace__step'))).join('\n')
-  const content = `---\n${[...frontmatter, 'mode: subagent', 'permissions:', ...permissions].join('\n')}\n---\n${transformedBody}`
+  return `---\n${[...frontmatter, 'mode: subagent', 'permissions:', ...permissions].join('\n')}\n---\n${transformedBody}`
+}
+
+function finalizeOpenCodeAgent(agent, content) {
   if (/^(name|model|tools):/m.test(content.split('---\n')[1]) || content.includes('mcp__carapace__step') || content.includes('model: inherit')) {
     throw new Error(`${agent.path} transform left deprecated or Claude-only fields in the OpenCode output`)
   }
   return { ...agent, content: Buffer.from(content, 'utf8') }
+}
+
+export function toOpenCodeAgent(agent) {
+  return finalizeOpenCodeAgent(agent, transformOpenCodeAgentContent(agent))
+}
+
+export function toOpenCodeAgents(agents) {
+  const matched = new Set()
+  const drafts = agents.map((agent) => ({ agent, content: transformOpenCodeAgentContent(agent, matched) }))
+  const unmatched = OPENCODE_BODY_REPLACEMENTS.map(([from]) => from).filter((from) => !matched.has(from))
+  if (unmatched.length > 0) {
+    throw new Error(
+      `OpenCode agent transform found unmatched OPENCODE_BODY_REPLACEMENTS entries (${unmatched.length}):\n${listed(unmatched)}`,
+    )
+  }
+  return drafts.map(({ agent, content }) => finalizeOpenCodeAgent(agent, content))
 }
 
 const OPENCODE_COMMAND = `---
@@ -549,7 +571,7 @@ export function install({
         target: 'opencode',
         home: opencodeHome,
         skills,
-        agents: agents.map(toOpenCodeAgent),
+        agents: toOpenCodeAgents(agents),
         replace,
       }))
       results.push(installOpenCodeCommand({ home: opencodeHome, replace, changed: commandChanged }))

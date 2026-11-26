@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "taskId": "RW-HOOKS-INSTALL",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-27",
+  "requirements": [
+    {
+      "id": "REQ-RW-10",
+      "statement": "Claude Code register hook supports JSONC and resets prompt state cleanly across flows",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-10"
+      },
+      "evidence": [
+        {
+          "path": "hooks/register.tsx",
+          "symbol": "const stripJsonComments = (text: string): string => {"
+        },
+        {
+          "path": "hooks/register.tsx",
+          "symbol": "const parseJsonc = (text: string): unknown => JSON.parse(stripJsonComments(text))"
+        },
+        {
+          "path": "hooks/register.tsx",
+          "symbol": "const cfg = parseJsonc(rawCfg) as { canonical?: unknown } | null"
+        },
+        {
+          "path": "hooks/register.tsx",
+          "symbol": "const newFlow = isNewFlow(prev, input)"
+        },
+        {
+          "path": "hooks/register.tsx",
+          "symbol": "lastSuggestedText = ''"
+        },
+        {
+          "path": "hooks/register.tsx",
+          "symbol": "await update($, panel, p => (p.registerPrompt === undefined ? p : { ...p, registerPrompt: undefined }))"
+        },
+        {
+          "path": "hooks/register.test.ts",
+          "symbol": "syncRegister parses JSONC config comments and rejects unterminated block comments"
+        },
+        {
+          "path": "hooks/register.test.ts",
+          "symbol": "repeated nextPrompt is re-suggested across new flows without duplicating on turn.complete"
+        },
+        {
+          "path": "hooks/register.test.ts",
+          "symbol": "omitting nextPrompt on a progress call clears panel.registerPrompt"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "claude plugin test .",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-11",
+      "statement": "OpenCode installer transform enforces matched replacements loudly",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-11"
+      },
+      "evidence": [
+        {
+          "path": "scripts/install.mjs",
+          "symbol": "export const OPENCODE_BODY_REPLACEMENTS = ["
+        },
+        {
+          "path": "scripts/install.mjs",
+          "symbol": "function transformOpenCodeAgentContent(agent, matched)"
+        },
+        {
+          "path": "scripts/install.mjs",
+          "symbol": "export function toOpenCodeAgents(agents)"
+        },
+        {
+          "path": "scripts/install.mjs",
+          "symbol": "agents: toOpenCodeAgents(agents)"
+        },
+        {
+          "path": "scripts/install.test.mjs",
+          "symbol": "opencode agent transform fails loudly when any OPENCODE_BODY_REPLACEMENTS entry matches zero times (REQ-RW-11)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "hooks/register.tsx",
+    "hooks/register.test.ts",
+    "scripts/install.mjs",
+    "scripts/install.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "session.start and Write/Edit/MultiEdit/Bash tool.call hooks",
+      "implementation": "hooks/register.tsx#async function syncRegister($: EngineInterface): Promise<void>",
+      "consumer": "hooks/register.tsx#await syncRegister($)"
+    },
+    {
+      "entryPoint": "mcp__carapace__progress tool.call hook",
+      "implementation": "hooks/register.tsx#async function answerProgress($: EngineInterface, e: { agentId?: string }): Promise<{ result: string }>",
+      "consumer": "hooks/register.tsx#if (p.registerPrompt) await suggestNext($, p.registerPrompt)"
+    },
+    {
+      "entryPoint": "node scripts/install.mjs --target opencode",
+      "implementation": "scripts/install.mjs#export function toOpenCodeAgents(agents)",
+      "consumer": "scripts/install.mjs#agents: toOpenCodeAgents(agents)"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Unterminated block comments in .execution-plan-integrity.json fail JSONC parsing and leave the progress bar open rather than falsely closing it, while valid // and /* ... */ comments (with comment-like strings preserved) parse cleanly and close the bar when all rows are DONE.",
+      "kind": "test",
+      "evidence": "hooks/register.test.ts exercises both an unterminated /* comment (bar stays at Tasks 1/2) and full JSONC comments plus comment-like string escapes (bar transitions to Done) across both terminal and desktop surfaces.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Repeating the same nextPrompt across new flows re-suggests it once per flow without duplicating on turn.complete, and omitting nextPrompt on an in-flow or finished: true progress call clears panel.registerPrompt, removes the carapace-next button, and prevents turn.complete from re-suggesting a stale command.",
+      "kind": "test",
+      "evidence": "hooks/register.test.ts verifies repeated /carapace audit suggestions across multi-step and single-call flows and verifies omitted nextPrompt clears carapace-next and suppresses stale turn.complete suggestions across both terminal and desktop surfaces.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Mutating any entry in OPENCODE_BODY_REPLACEMENTS (including subtle drift retaining model: inherit), passing an empty agent set, or running --target opencode --replace with an unmatched phrase throws naming the exact unmatched phrase(s) before mutating opencodeHome.",
+      "kind": "test",
+      "evidence": "scripts/install.test.mjs mutates each of the 4 replacement entries individually, tests subtle model: inherit drift, tests --replace preservation, and tests toOpenCodeAgents([]), confirming exact error messages and untouched temp opencodeHome directories.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "DELIVERED"
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Published config JSON Schema, expanded capability drift detection, setup profile proposal, and stateless active-run capability-change conflict detection (REQ-RW-12, REQ-RW-13) remain queued in RW-SCHEMA-CAP.",
+    "Dogfooding Carapace's .execution-plan-integrity.json profile and end-to-end fixture validation (REQ-RW-14) remain queued in RW-DOGFOOD-CLOSE.",
+    "Live scripts/install.mjs --replace against real maintainer harness homes remains manual per D-REWORK-HARDENING."
+  ],
+  "closedRow": "| 11 | `RW-HOOKS-INSTALL` | `IMPLEMENTATION` | `NOW` | Fix `hooks/register.tsx` (`syncRegister` JSONC parsing, reset `lastSuggestedText` on new flow, clear `panel.registerPrompt` when `nextPrompt` is omitted) and `scripts/install.mjs` (assert every `OPENCODE_BODY_REPLACEMENTS` entry matches at least once) with hook and temp-dir installer tests. Closes when `claude plugin test .` and `scripts/install.test.mjs` pass. | `D-REWORK-HARDENING` REQ-RW-10, REQ-RW-11. |",
+  "notes": [
+    "Preserved exported toOpenCodeAgent(agent) alongside set-wide toOpenCodeAgents(agents) so single-agent callers stay valid while OpenCode installs enforce every OPENCODE_BODY_REPLACEMENTS entry across the agent set before writing to disk.",
+    "No files under skills/execution-plan-integrity/ were modified, so ARTIFACT_SHA256 remains unchanged."
+  ]
+}

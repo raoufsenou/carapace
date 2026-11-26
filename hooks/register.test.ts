@@ -596,5 +596,189 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run NEW-STEP')
     await ui.unmount()
   })
+
+  test(`${surface}: syncRegister parses JSONC config comments and rejects unterminated block comments`, async ($, on) => {
+    const doneMd = `<!-- execution-role: canonical -->
+<!-- execution-register:start -->
+\`NOW\`: \`NONE\`
+
+| Order | ID | Kind | State | Work and completion boundary | Source or evidence |
+| --- | --- | --- | --- | --- | --- |
+| 1 | \`RW-1\` | \`IMPLEMENTATION\` | \`DONE\` | Completed 2026-11-26; docs/execution-proofs/RW-1.json. | Design |
+<!-- execution-register:end -->`
+
+    let rawConfig = `{
+  /* unterminated block comment
+  "canonical": "docs/execution-plan.md"
+}`
+
+    on('fs.read', async (_$, e) => {
+      if (e.path.endsWith('.execution-plan-integrity.json')) return { value: rawConfig } as never
+      if (e.path.endsWith('docs/execution-plan.md')) return { value: doneMd } as never
+      throw new Error(`ENOENT: ${e.path}`)
+    })
+    on('tool.call', { tool: 'Edit' }, async () => ({ result: 'edited' }) as never)
+    on('ui.render', { component: 'AbovePrompt' }, (_$, e) => {
+      const { Box } = _$.ui.resolve(e)
+      return Box({})
+    })
+
+    await $.tool.call({ tool: PROGRESS, title: 'JSONC sync', phase: 'delegate', total: 2, done: 1 } as never)
+
+    // An unterminated block comment must throw in JSONC parsing and NOT falsely close the bar.
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
+    const barOpen = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    if (surface === 'terminal') {
+      expect(await barOpen.find({ text: /Tasks 1\/2/ })).toBeDefined()
+      expect(await barOpen.find({ text: /Done/ })).toBeUndefined()
+    } else {
+      const svg = String((await barOpen.find({ type: 'Svg' }))?.props.source)
+      expect(svg).toContain('Tasks 1/2')
+      expect(svg).not.toContain('Done')
+    }
+    await barOpen.unmount()
+
+    // Valid JSONC with line comments, block comments, and comment-like strings closes the bar to Done.
+    rawConfig = `// Execution plan integrity config
+{
+  "$schema": "https://example.com/schema.json",
+  "note": "/* keep */ and \\" // keep \\\\",
+  /* Multi-line block comment
+     covering schema field */
+  "schema":/* inline */2,
+  "canonical": "docs/execution-plan.md" // canonical register path
+}`
+
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
+    const barDone = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
+    if (surface === 'terminal') {
+      expect(await barDone.find({ text: /Done/ })).toBeDefined()
+    } else {
+      const svg = String((await barDone.find({ type: 'Svg' }))?.props.source)
+      expect(svg).toContain('Done')
+    }
+    await barDone.unmount()
+  })
+
+  test(`${surface}: repeated nextPrompt is re-suggested across new flows without duplicating on turn.complete`, async ($, on) => {
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      if (e.text) suggested.push(e.text)
+      return { isShown: true }
+    })
+    on('turn.complete', () => ({ text: '' }) as never)
+
+    // Flow 1: closes with /carapace audit; turn.complete does not duplicate it.
+    await $.tool.call({ tool: PROGRESS, title: 'Flow 1', phase: 'delegate', total: 1, done: 0 } as never)
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow 1',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace audit',
+    } as never)
+    expect(suggested).toEqual(['/carapace audit'])
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'flow 1 done' })
+    expect(suggested).toEqual(['/carapace audit'])
+
+    // Flow 2: multi-step new flow closing with the same /carapace audit re-suggests it once.
+    await $.tool.call({ tool: PROGRESS, title: 'Flow 2', phase: 'delegate', total: 1, done: 0 } as never)
+    expect(suggested).toEqual(['/carapace audit'])
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow 2',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace audit',
+    } as never)
+    expect(suggested).toEqual(['/carapace audit', '/carapace audit'])
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'flow 2 done' })
+    expect(suggested).toEqual(['/carapace audit', '/carapace audit'])
+
+    // Flow 3: single-call finished flow with a new title and the same nextPrompt also suggests it once.
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow 3',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace audit',
+    } as never)
+    expect(suggested).toEqual(['/carapace audit', '/carapace audit', '/carapace audit'])
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'flow 3 done' })
+    expect(suggested).toEqual(['/carapace audit', '/carapace audit', '/carapace audit'])
+  })
+
+  test(`${surface}: omitting nextPrompt on a progress call clears panel.registerPrompt`, async ($, on) => {
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      if (e.text) suggested.push(e.text)
+      return { isShown: true }
+    })
+    on('turn.complete', () => ({ text: '' }) as never)
+
+    // In-flow call sets nextPrompt -> carapace-next renders in Pane.
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow A',
+      phase: 'delegate',
+      total: 2,
+      done: 0,
+      nextPrompt: '/carapace audit',
+    } as never)
+    expect(suggested).toEqual(['/carapace audit'])
+    let ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await ui.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace audit')
+    await ui.unmount()
+
+    // Follow-up progress call in the SAME flow omitting nextPrompt clears registerPrompt and prevents turn.complete re-suggest.
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow A',
+      phase: 'delegate',
+      total: 2,
+      done: 1,
+    } as never)
+    ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect(await ui.find({ key: 'carapace-next' })).toBeUndefined()
+    await ui.unmount()
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'mid-flow pause' })
+    expect(suggested).toEqual(['/carapace audit'])
+
+    // Closing call of the same flow passing nextPrompt again renders and suggests it cleanly.
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow A',
+      phase: 'close',
+      total: 2,
+      done: 2,
+      finished: true,
+      nextPrompt: '/carapace audit',
+    } as never)
+    expect(suggested).toEqual(['/carapace audit', '/carapace audit'])
+    ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await ui.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace audit')
+    await ui.unmount()
+
+    // A finished: true call omitting nextPrompt after a previous flow set nextPrompt also clears registerPrompt.
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Flow B',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+    } as never)
+    ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect(await ui.find({ key: 'carapace-next' })).toBeUndefined()
+    await ui.unmount()
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'flow B done' })
+    expect(suggested).toEqual(['/carapace audit', '/carapace audit'])
+  })
 }
 

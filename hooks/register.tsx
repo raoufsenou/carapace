@@ -856,14 +856,64 @@ async function suggestNext($: EngineInterface, text: string | undefined): Promis
   await $.prompt.suggest({ text: clean }).catch(() => null)
 }
 
+const stripJsonComments = (text: string): string => {
+  let out = ''
+  let i = 0
+  let inString = false
+  let escaped = false
+  while (i < text.length) {
+    const ch = text.charAt(i)
+    const next = text.charAt(i + 1)
+    if (inString) {
+      out += ch
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      i += 1
+      continue
+    }
+    if (ch === '"') {
+      inString = true
+      out += ch
+      i += 1
+      continue
+    }
+    if (ch === '/' && next === '/') {
+      i += 2
+      while (i < text.length && text.charAt(i) !== '\n' && text.charAt(i) !== '\r') i += 1
+      continue
+    }
+    if (ch === '/' && next === '*') {
+      i += 2
+      let closed = false
+      while (i + 1 < text.length) {
+        if (text.charAt(i) === '*' && text.charAt(i + 1) === '/') {
+          i += 2
+          closed = true
+          break
+        }
+        i += 1
+      }
+      if (!closed) throw new SyntaxError('Unterminated block comment in JSONC')
+      out += ' '
+      continue
+    }
+    out += ch
+    i += 1
+  }
+  return out
+}
+
+const parseJsonc = (text: string): unknown => JSON.parse(stripJsonComments(text))
+
 // The hook never derives a command from plan rows. `status.mjs` is the only
 // producer of a next command; the `progress` tool is the only channel into the
 // UI. This function's sole job is to close the bar when every row is DONE.
 async function syncRegister($: EngineInterface): Promise<void> {
   try {
     const rawCfg = await $.fs.read(REGISTER_CONFIG)
-    const cfg = JSON.parse(rawCfg) as { canonical?: unknown }
-    if (typeof cfg.canonical !== 'string' || !cfg.canonical.trim()) return
+    const cfg = parseJsonc(rawCfg) as { canonical?: unknown } | null
+    if (!cfg || typeof cfg !== 'object' || typeof cfg.canonical !== 'string' || !cfg.canonical.trim()) return
     const md = await $.fs.read(cfg.canonical.trim().replace(/^\.\//, ''))
     if (parseRegister(md) !== true) return
     const current = await read($, flow)
@@ -894,10 +944,17 @@ async function answerProgress($: EngineInterface, e: { agentId?: string }): Prom
     if (e.agentId) return { result: 'ignored: only the main session reports the flow' }
     const input = e as unknown as ProgressInput
     const prev = await read($, flow)
-    if (isNewFlow(prev, input) && !input.finished) {
-      await update($, agents, list => list.filter(a => a.status === 'running'))
-      // A new run must not keep the previous run's command on screen.
-      await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '', registerPrompt: undefined }))
+    const newFlow = isNewFlow(prev, input)
+    if (newFlow) {
+      if (!input.finished) {
+        await update($, agents, list => list.filter(a => a.status === 'running'))
+        // A new run must not keep the previous run's command on screen.
+        await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '', registerPrompt: undefined }))
+      } else {
+        await update($, panel, p => (p.registerPrompt === undefined ? p : { ...p, registerPrompt: undefined }))
+      }
+      // Reset after clearing panel.registerPrompt so a concurrent turn.complete cannot re-suggest a stale command.
+      lastSuggestedText = ''
     }
     const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
     if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
@@ -905,6 +962,9 @@ async function answerProgress($: EngineInterface, e: { agentId?: string }): Prom
     if (explicit) {
       await update($, panel, p => ({ ...p, registerPrompt: explicit }))
       await suggestNext($, explicit)
+    } else {
+      await update($, panel, p => (p.registerPrompt === undefined ? p : { ...p, registerPrompt: undefined }))
+      lastSuggestedText = ''
     }
     return { result: `ok: ${label(next ?? blank())}` }
   } catch (err) {

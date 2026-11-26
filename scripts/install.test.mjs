@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { commandPlan, install } from './install.mjs'
+import { OPENCODE_BODY_REPLACEMENTS, commandPlan, install, toOpenCodeAgents } from './install.mjs'
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'install.mjs')
 const temporaryRoots = []
@@ -32,6 +32,17 @@ function filesIn(folder) {
     .sort()
 }
 
+const DEMO_ADVISOR_AGENT =
+  '---\nname: carapace-advisor\nmodel: inherit\ndescription: Advisor.\ntools: Read, Glob, Grep, Bash\n---\n\n' +
+  "3. **Model inheritance (`D-MODEL-INHERIT`)**: You inherit the orchestrator's live model via `model: inherit`. " +
+  'Any copy-ready orchestration prompt you emit must tell the orchestrator to spawn `carapace:*` agents **without** an Agent `model` parameter (omit it entirely) so workers inherit the orchestrator session model.\n'
+
+const DEMO_HEAVY_AGENT =
+  '---\nname: carapace-heavy\nmodel: inherit\ndescription: Heavy.\ntools: Read, mcp__carapace__step\n---\n\n' +
+  "- **Model inheritance & no re-delegation**: You run on the orchestrator's live model via frontmatter `model: inherit`. " +
+  'Your tool allowlist excludes `Agent`, so re-delegation is impossible.\n' +
+  '- **Progress reporting**: Call `mcp__carapace__step` after each step.\n'
+
 function demo() {
   const root = temporaryRoot()
   const checkout = join(root, 'checkout')
@@ -41,8 +52,8 @@ function demo() {
   write(checkout, 'skills/carapace/agents/openai.yaml', 'interface:\n  display_name: "Carapace"\n')
   write(checkout, 'skills/carapace/assets/status.mjs', 'export {}\n')
   write(checkout, 'skills/carapace/assets/.DS_Store', 'system\n')
-  write(checkout, 'agents/carapace-advisor.md', '---\nname: carapace-advisor\ndescription: Advisor.\n---\n\nAdvisor body.\n')
-  write(checkout, 'agents/carapace-heavy.md', '---\nname: carapace-heavy\ndescription: Heavy.\n---\n\nHeavy body.\n')
+  write(checkout, 'agents/carapace-advisor.md', DEMO_ADVISOR_AGENT)
+  write(checkout, 'agents/carapace-heavy.md', DEMO_HEAVY_AGENT)
   return {
     checkout,
     claudeHome: join(root, 'claude'),
@@ -112,7 +123,7 @@ test('diverged skill or agent files are refused until --replace replaces them', 
   assert.equal(replaced[0].action, 'replaced')
   assert.equal(
     readFileSync(join(cursorHome, 'agents', 'carapace-heavy.md'), 'utf8'),
-    '---\nname: carapace-heavy\ndescription: Heavy.\n---\n\nHeavy body.\n',
+    DEMO_HEAVY_AGENT,
   )
 })
 
@@ -205,13 +216,7 @@ test('opencode installs drop-in skills, agents, and a generated command under it
 
 test('opencode agent output drops Claude fields and permissions deny re-delegation', () => {
   const { checkout, opencodeHome } = demo()
-  write(
-    checkout,
-    'agents/carapace-heavy.md',
-    '---\nname: carapace-heavy\nmodel: inherit\ndescription: Heavy.\ntools: Read, mcp__carapace__step\n---\n\n' +
-      '- **Model inheritance & no re-delegation**: You run on the orchestrator\'s live model via frontmatter `model: inherit`.\n' +
-      '- **Progress reporting**: Call `mcp__carapace__step` after each step.\n',
-  )
+  write(checkout, 'agents/carapace-heavy.md', DEMO_HEAVY_AGENT)
   install({ checkout, opencodeHome, targets: ['opencode'] })
 
   const source = readFileSync(join(checkout, 'agents/carapace-heavy.md'), 'utf8')
@@ -223,10 +228,14 @@ test('opencode agent output drops Claude fields and permissions deny re-delegati
   assert.match(worker, /action: subagent/)
   assert.match(worker, /effect: deny/)
   assert.match(worker, /because OpenCode subagents inherit the parent session model/)
+  assert.match(worker, /OpenCode permissions deny the `subagent` action, so re-delegation is impossible\./)
 
   const advisor = readFileSync(join(opencodeHome, 'agents', 'carapace-advisor.md'), 'utf8')
+  assert.doesNotMatch(advisor, /^(name|model|tools):/m)
+  assert.doesNotMatch(advisor, /model: inherit/)
   assert.match(advisor, /action: edit/)
   assert.match(advisor, /action: subagent/)
+  assert.match(advisor, /without\*\* a `model` override/)
 })
 
 test('opencode command and agents are replace-gated and installed copies stay independent', () => {
@@ -256,4 +265,78 @@ test('opencode command and agents are replace-gated and installed copies stay in
   install({ checkout, opencodeHome, targets: ['opencode'], replace: true })
   const current = install({ checkout, opencodeHome, targets: ['opencode'] })
   assert.deepEqual(current.map((result) => result.action), ['current', 'current'])
+})
+
+test('opencode agent transform fails loudly when any OPENCODE_BODY_REPLACEMENTS entry matches zero times (REQ-RW-11)', () => {
+  assert.equal(OPENCODE_BODY_REPLACEMENTS.length, 4)
+
+  const assertUnmatchedError = (fn, expectedPhrases) => {
+    assert.throws(fn, (error) => {
+      assert.ok(error instanceof Error)
+      assert.match(error.message, /unmatched OPENCODE_BODY_REPLACEMENTS/)
+      for (const phrase of expectedPhrases) {
+        assert.ok(error.message.includes(phrase), `expected error to include unmatched phrase: ${phrase}`)
+      }
+      return true
+    })
+  }
+
+  for (const [from] of OPENCODE_BODY_REPLACEMENTS) {
+    const mutatedAdvisor = DEMO_ADVISOR_AGENT.replaceAll(from, 'altered upstream phrase.')
+    const mutatedHeavy = DEMO_HEAVY_AGENT.replaceAll(from, 'altered upstream phrase.')
+    const agents = [
+      {
+        name: 'carapace-advisor',
+        file: 'carapace-advisor.md',
+        path: 'agents/carapace-advisor.md',
+        content: Buffer.from(mutatedAdvisor, 'utf8'),
+      },
+      {
+        name: 'carapace-heavy',
+        file: 'carapace-heavy.md',
+        path: 'agents/carapace-heavy.md',
+        content: Buffer.from(mutatedHeavy, 'utf8'),
+      },
+    ]
+
+    assertUnmatchedError(() => toOpenCodeAgents(agents), [from])
+
+    const { checkout, opencodeHome } = demo()
+    write(checkout, 'agents/carapace-advisor.md', mutatedAdvisor)
+    write(checkout, 'agents/carapace-heavy.md', mutatedHeavy)
+    assertUnmatchedError(() => install({ checkout, opencodeHome, targets: ['opencode'] }), [from])
+    assert.equal(existsSync(opencodeHome), false)
+  }
+
+  // Subtle upstream drift that still contains `model: inherit` must still surface the exact unmatched entry.
+  {
+    const [workerModelPhrase] = OPENCODE_BODY_REPLACEMENTS[0]
+    const driftedHeavy = DEMO_HEAVY_AGENT.replace(
+      workerModelPhrase,
+      "You run on the orchestrator's session model via frontmatter `model: inherit`.",
+    )
+    const { checkout, opencodeHome } = demo()
+    write(checkout, 'agents/carapace-heavy.md', driftedHeavy)
+    assertUnmatchedError(() => install({ checkout, opencodeHome, targets: ['opencode'] }), [workerModelPhrase])
+    assert.equal(existsSync(opencodeHome), false)
+  }
+
+  // Even with replace: true, an unmatched phrase fails before mutating an existing OpenCode install.
+  {
+    const [allowlistPhrase] = OPENCODE_BODY_REPLACEMENTS[2]
+    const { checkout, opencodeHome } = demo()
+    install({ checkout, opencodeHome, targets: ['opencode'] })
+    const beforeWorker = readFileSync(join(opencodeHome, 'agents', 'carapace-heavy.md'), 'utf8')
+    write(checkout, 'agents/carapace-heavy.md', DEMO_HEAVY_AGENT.replace(allowlistPhrase, 'altered allowlist wording.'))
+    assertUnmatchedError(
+      () => install({ checkout, opencodeHome, targets: ['opencode'], replace: true }),
+      [allowlistPhrase],
+    )
+    assert.equal(readFileSync(join(opencodeHome, 'agents', 'carapace-heavy.md'), 'utf8'), beforeWorker)
+  }
+
+  assertUnmatchedError(
+    () => toOpenCodeAgents([]),
+    OPENCODE_BODY_REPLACEMENTS.map(([from]) => from),
+  )
 })
