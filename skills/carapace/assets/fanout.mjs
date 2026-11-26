@@ -1,4 +1,3 @@
-import { join } from 'node:path'
 import { extractBatchMembers } from './batch.mjs'
 
 const CROSS_APP_SHARED_RE =
@@ -7,6 +6,10 @@ const SINGLE_APP_SHARED_RE =
   /\b(?:router\.tsx|routes\.tsx|app-shell|PaperAppLayout|AppLayout|Layout\.tsx|Shell\.tsx|Rail\.tsx|primitives\.css|tokens\.css|contract\.ts|server\.ts|api\.ts)\b/i
 const SHARED_STEP_ID_RE = /(?:^|-)(?:SHARED|FRAME|SHELL|RAIL|FOUNDATION|PREREQ)(?:-|$)/i
 const GATE_STEP_RE = /(?:^|-)(?:TESTS|E2E|VERIFY|ROLLUP)(?:-|$)|\b(?:end-to-end|browser-tests|e2e suite|full suite)\b/i
+
+function isImplementationRow(row) {
+  return Boolean(row) && (row.kind === 'IMPLEMENTATION' || !row.kind)
+}
 
 function extractRowSliceInfo(row) {
   const work = row.work ?? ''
@@ -44,6 +47,8 @@ function extractRowSliceInfo(row) {
     row,
     rawPaths,
     appScope,
+    isImplementation: isImplementationRow(row),
+    isBatch: /^Batch:\s+/i.test(work),
     isSharedBarrier,
     isGate,
     touchesSingleAppShared,
@@ -52,6 +57,7 @@ function extractRowSliceInfo(row) {
 }
 
 function pathsOverlap(leftPaths, rightPaths) {
+  if (leftPaths.length === 0 || rightPaths.length === 0) return true
   for (const left of leftPaths) {
     for (const right of rightPaths) {
       if (left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`)) {
@@ -68,7 +74,9 @@ function selectDisjointSlice(candidates) {
   const firstAuditKind = infos[0].isAuditStep
   const bounded = []
   for (const info of infos) {
-    if (info.isSharedBarrier || info.isGate) break
+    if (!info.isImplementation || info.isBatch || info.isSharedBarrier || info.isGate || info.rawPaths.length === 0) {
+      break
+    }
     if (firstAuditKind && !info.isAuditStep) break
     bounded.push(info)
   }
@@ -94,11 +102,13 @@ function selectDisjointSlice(candidates) {
 
 function analyzeFanoutReadiness(rows, now) {
   const activeRows = rows.filter((row) => row.state === 'NOW' || row.state === 'QUEUED')
-  const nowRow = activeRows.find((row) => row.id === now)
-  if (!nowRow) {
+  const nowIndex = activeRows.findIndex((row) => row.id === now)
+  if (nowIndex === -1) {
     return { mode: 'idle', parallelIds: [], sharedReason: null }
   }
-  if (/^Batch:\s+/i.test(nowRow.work)) {
+  const orderedActive = activeRows.slice(nowIndex)
+  const nowRow = orderedActive[0]
+  if (/^Batch:\s+/i.test(nowRow.work ?? '')) {
     return {
       mode: 'already-batch',
       parallelIds: extractBatchMembers(nowRow.work),
@@ -106,18 +116,21 @@ function analyzeFanoutReadiness(rows, now) {
     }
   }
 
-  const nowIsImplementation = nowRow.kind === 'IMPLEMENTATION' || !nowRow.kind
-  const implRows = activeRows.filter((row) => row.kind === 'IMPLEMENTATION' || !row.kind)
-  if (implRows.length < 2) {
+  const nowIsImplementation = isImplementationRow(nowRow)
+  const candidateRows = nowIsImplementation ? orderedActive : orderedActive.slice(1)
+  if (candidateRows.length < 2 || !isImplementationRow(candidateRows[0])) {
     return { mode: 'sequential', parallelIds: [], sharedReason: null }
   }
 
-  const first = implRows[0]
+  const first = candidateRows[0]
   const firstInfo = extractRowSliceInfo(first)
+  if (firstInfo.isBatch) {
+    return { mode: 'sequential', parallelIds: [], sharedReason: null }
+  }
   const firstIsShared = firstInfo.isSharedBarrier || firstInfo.touchesSingleAppShared
 
   if (firstIsShared) {
-    const restDisjoint = selectDisjointSlice(implRows.slice(1))
+    const restDisjoint = selectDisjointSlice(candidateRows.slice(1))
     if (restDisjoint.length >= 2) {
       return nowIsImplementation
         ? {
@@ -137,7 +150,7 @@ function analyzeFanoutReadiness(rows, now) {
     return { mode: 'sequential', parallelIds: [], sharedReason: null }
   }
 
-  const parallelSlice = selectDisjointSlice(implRows)
+  const parallelSlice = selectDisjointSlice(candidateRows)
   if (parallelSlice.length >= 2) {
     return nowIsImplementation
       ? {

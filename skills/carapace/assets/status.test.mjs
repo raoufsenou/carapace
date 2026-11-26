@@ -11,6 +11,7 @@ import {
   parseRegisterStatus,
   readCarapaceStatus,
 } from './status.mjs'
+import { analyzeFanoutReadiness } from './fanout.mjs'
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'status.mjs')
 const roots = []
@@ -681,4 +682,79 @@ test('pre-run requirements brief is extracted from the locked design authority',
   assert.equal(gated.preflight.hasConflict, true)
   assert.equal(gated.preflight.conflicts[0].kind, 'requirements-not-locked')
   assert.match(gated.preflight.conflicts[0].options[0].command, /lock in the requirements/)
+})
+
+test('fanout analysis preserves non-IMPLEMENTATION register gates and rejects unscoped rows (REQ-RW-4)', () => {
+  const implWeb = { id: 'WEB-HOME', kind: 'IMPLEMENTATION', state: 'NOW', work: 'Fix apps/web/src/Home.tsx spacing.' }
+  const implAdmin = { id: 'ADMIN-HOME', kind: 'IMPLEMENTATION', state: 'QUEUED', work: 'Fix apps/admin/src/Home.tsx spacing.' }
+  const implMobile = { id: 'MOBILE-HOME', kind: 'IMPLEMENTATION', state: 'QUEUED', work: 'Fix apps/mobile/src/Home.tsx spacing.' }
+  const valGate = { id: 'VAL-1', kind: 'VALIDATION', state: 'QUEUED', work: 'Validate web slice.' }
+  const designGate = { id: 'DES-1', kind: 'DESIGN', state: 'QUEUED', work: 'Lock admin design.' }
+
+  assert.equal(
+    analyzeFanoutReadiness([implWeb, valGate, implAdmin], 'WEB-HOME').mode,
+    'sequential',
+  )
+  assert.equal(
+    analyzeFanoutReadiness([implWeb, designGate, implAdmin], 'WEB-HOME').mode,
+    'sequential',
+  )
+
+  const capped = analyzeFanoutReadiness([implWeb, implAdmin, valGate, implMobile], 'WEB-HOME')
+  assert.equal(capped.mode, 'parallel-ready')
+  assert.deepEqual(capped.parallelIds, ['WEB-HOME', 'ADMIN-HOME'])
+
+  const valThenDesign = analyzeFanoutReadiness(
+    [
+      { id: 'GATE-NOW', kind: 'VALIDATION', state: 'NOW', work: 'Run baseline validation.' },
+      designGate,
+      { ...implWeb, state: 'QUEUED' },
+      implAdmin,
+    ],
+    'GATE-NOW',
+  )
+  assert.equal(valThenDesign.mode, 'sequential')
+
+  const valThenBatch = analyzeFanoutReadiness(
+    [
+      { id: 'GATE-NOW', kind: 'VALIDATION', state: 'NOW', work: 'Run baseline validation.' },
+      {
+        id: 'BATCH-QUEUED',
+        kind: 'IMPLEMENTATION',
+        state: 'QUEUED',
+        work: 'Batch: from `abc1234`; web applies `WEB-HOME` owning `packages/ui/`.',
+      },
+      { ...implWeb, state: 'QUEUED' },
+      implAdmin,
+    ],
+    'GATE-NOW',
+  )
+  assert.equal(valThenBatch.mode, 'sequential')
+
+  const sharedThenVal = analyzeFanoutReadiness(
+    [
+      { id: 'SHARED-FRAME', kind: 'IMPLEMENTATION', state: 'NOW', work: 'Update packages/ui shared frame.' },
+      valGate,
+      { ...implWeb, state: 'QUEUED' },
+      implAdmin,
+    ],
+    'SHARED-FRAME',
+  )
+  assert.equal(sharedThenVal.mode, 'sequential')
+
+  const unscopedA = { id: 'TASK-A', kind: 'IMPLEMENTATION', state: 'NOW', work: 'Tighten error copy.' }
+  const unscopedB = { id: 'TASK-B', kind: 'IMPLEMENTATION', state: 'QUEUED', work: 'Tighten retry timing.' }
+  assert.equal(analyzeFanoutReadiness([unscopedA, unscopedB], 'TASK-A').mode, 'sequential')
+  assert.equal(analyzeFanoutReadiness([implWeb, unscopedB], 'WEB-HOME').mode, 'sequential')
+  assert.equal(analyzeFanoutReadiness([unscopedA, implAdmin], 'TASK-A').mode, 'sequential')
+
+  const sharedThenUnscoped = analyzeFanoutReadiness(
+    [
+      { id: 'SHARED-FRAME', kind: 'IMPLEMENTATION', state: 'NOW', work: 'Update packages/ui shared frame.' },
+      { ...unscopedA, state: 'QUEUED' },
+      unscopedB,
+    ],
+    'SHARED-FRAME',
+  )
+  assert.equal(sharedThenUnscoped.mode, 'sequential')
 })
