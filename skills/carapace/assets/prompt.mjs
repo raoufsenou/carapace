@@ -594,7 +594,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   const mentionsKnownTask =
     (status.rows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase())) ||
     (status.unorderedRows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase()))
-  const isLifecycleCommand = /\b(?:run|setup|init|migrate|audit|reconcile|decide|verdict|verify|status)\b/i.test(text)
+  const isLifecycleCommand = /\b(?:run|setup|init|migrate|audit|reconcile|decide|verdict|verify|status|advise|next|prompt|plan|report)\b/i.test(text)
   if (activeNow && !mentionsKnownTask && !isLifecycleCommand) {
     conflicts.push({
       kind: 'active-now-task',

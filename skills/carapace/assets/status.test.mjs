@@ -533,3 +533,28 @@ test('capability profiles gate project-type engines and preflight requests', () 
   assert.ok(override.capabilities.drift.some((item) => item.includes('no UI files')))
 })
 
+test('documented menu and report commands do not collide with an active NOW', () => {
+  const root = tempRepo()
+  write(root, '.execution-plan-integrity.json', JSON.stringify({
+    schema: 2,
+    canonical: 'docs/execution-plan.md',
+    completionProofs: { directory: 'docs/execution-proofs' },
+    requiredGlobs: ['docs/**/*.md'],
+    roles: { evidence: ['docs/**/*audit*.md'], design: ['docs/*.md'] },
+  }))
+  write(root, 'docs/execution-plan.md', [
+    '<!-- execution-role: canonical -->',
+    '<!-- execution-register:start -->',
+    '`NOW`: `ACTIVE-STEP`',
+    '',
+    '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| 1 | `ACTIVE-STEP` | `IMPLEMENTATION` | `NOW` | Active work. | Plan |',
+    '<!-- execution-register:end -->',
+  ].join('\n'))
+
+  for (const prompt of ['preempt ACTIVE-STEP: switch', 'plan ', 'report web', 'advise', 'next', 'prompt', 'verify']) {
+    const status = readCarapaceStatus({ root, prompt })
+    assert.deepEqual(status.preflight.conflicts.map((conflict) => conflict.kind), [], `${prompt} must not conflict`)
+  }
+})
