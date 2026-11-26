@@ -43,6 +43,15 @@ test('commandPlan parses --root, --config, --json, --check, and --prompt and rej
     check: true,
     prompt: 'run in parallel',
   })
+  assert.deepEqual(commandPlan(['--no-yolo']), {
+    root: process.cwd(),
+    configPath: '.execution-plan-integrity.json',
+    yolo: false,
+  })
+  assert.deepEqual(commandPlan(['--no-yolo', '--yolo']), {
+    root: process.cwd(),
+    configPath: '.execution-plan-integrity.json',
+  })
   assert.throws(() => commandPlan(['--unknown', 'x']), /Usage: node status\.mjs/)
   assert.throws(() => commandPlan(['--root']), /Usage: node status\.mjs/)
 })
@@ -552,9 +561,19 @@ test('documented menu and report commands do not collide with an active NOW', ()
     '| 1 | `ACTIVE-STEP` | `IMPLEMENTATION` | `NOW` | Active work. | Plan |',
     '<!-- execution-register:end -->',
   ].join('\n'))
+  write(root, 'docs/active-requirements.md', [
+    '<!-- execution-role: design -->',
+    'Locked 2026-11-26 from the maintainer\'s direction during `ACTIVE-STEP`.',
+    'This is the authority for `ACTIVE-STEP`.',
+    '### REQ-A1 — first assertion',
+    '## Non-goals',
+    '- None.',
+  ].join('\n'))
 
-  for (const prompt of ['preempt ACTIVE-STEP: switch', 'plan ', 'report web', 'advise', 'next', 'prompt', 'verify']) {
+  for (const prompt of ['preempt ACTIVE-STEP: switch', 'plan ', 'report web', 'advise', 'next', 'prompt', 'verify', 'run ACTIVE-STEP --no-yolo', 'lock in the requirements for ACTIVE-STEP']) {
     const status = readCarapaceStatus({ root, prompt })
     assert.deepEqual(status.preflight.conflicts.map((conflict) => conflict.kind), [], `${prompt} must not conflict`)
   }
+  assert.equal(readCarapaceStatus({ root, prompt: 'verify', yolo: false }).gate.yolo, false)
 })
+

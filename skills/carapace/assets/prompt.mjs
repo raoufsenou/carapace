@@ -327,12 +327,13 @@ function buildStageAndOptions(status) {
 
 export function evaluatePromptConflicts(status, rawPrompt) {
   const text = (rawPrompt ?? '').trim()
-  if (!text) return { hasConflict: false, conflicts: [] }
+  if (!text) return { hasConflict: false, conflicts: [], warnings: [] }
 
   const conflicts = []
+  const warnings = []
   const isSetup = /\b(?:setup|init|initialize|migrate)\b/i.test(text)
   const isVerifyOnly = /\b(?:verify|status|check)\b/i.test(text) && !/\b(?:run|apply|fix|implement|build|add)\b/i.test(text)
-  if (isVerifyOnly) return { hasConflict: false, conflicts: [] }
+  if (isVerifyOnly) return { hasConflict: false, conflicts: [], warnings: [] }
 
   const capabilities = status.capabilities?.values
   if (capabilities) {
@@ -594,7 +595,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   const mentionsKnownTask =
     (status.rows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase())) ||
     (status.unorderedRows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase()))
-  const isLifecycleCommand = /\b(?:run|setup|init|migrate|audit|reconcile|decide|verdict|verify|status|advise|next|prompt|plan|report)\b/i.test(text)
+  const isLifecycleCommand = /\b(?:run|setup|init|migrate|audit|reconcile|decide|verdict|verify|status|advise|next|prompt|plan|report|yolo|lock|requirements)\b/i.test(text)
   if (activeNow && !mentionsKnownTask && !isLifecycleCommand) {
     conflicts.push({
       kind: 'active-now-task',
@@ -619,6 +620,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   return {
     hasConflict: conflicts.length > 0,
     conflicts,
+    warnings,
   }
 }
 export function optionCapability(command) {

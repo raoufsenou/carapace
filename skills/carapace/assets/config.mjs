@@ -5,7 +5,7 @@ const DEFAULT_CONFIG = '.execution-plan-integrity.json'
 const DEFAULT_PROOF_DIR = 'docs/execution-proofs'
 const BAR_CELLS = 16
 const USAGE =
-  'Usage: node status.mjs [--root repository] [--config repository-relative-path] [--json] [--check] [--prompt text]'
+  'Usage: node status.mjs [--root repository] [--config repository-relative-path] [--json] [--check] [--prompt text] [--no-yolo]'
 
 function safeRelative(value) {
   if (typeof value !== 'string' || value.length === 0 || isAbsolute(value)) return null
@@ -20,6 +20,7 @@ export function commandPlan(args) {
   let json = false
   let check = false
   let prompt = null
+  let yolo = true
 
   for (let index = 0; index < args.length; index += 1) {
     const flag = args[index]
@@ -29,6 +30,14 @@ export function commandPlan(args) {
     }
     if (flag === '--check') {
       check = true
+      continue
+    }
+    if (flag === '--no-yolo') {
+      yolo = false
+      continue
+    }
+    if (flag === '--yolo') {
+      yolo = true
       continue
     }
     const value = args[index + 1]
@@ -53,6 +62,7 @@ export function commandPlan(args) {
   if (json) plan.json = true
   if (check) plan.check = true
   if (prompt !== null) plan.prompt = prompt
+  if (!yolo) plan.yolo = false
   return plan
 }
 export function resolveCapabilities(config, appProfile = {}) {

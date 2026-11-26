@@ -16,10 +16,12 @@ export function readCarapaceStatus({
   configPath = DEFAULT_CONFIG,
   prompt = null,
   check = false,
+  yolo = true,
 } = {}) {
   const relConfig = safeRelative(configPath)
   if (!relConfig) throw new Error('Config path must be a non-empty repository-relative path.')
   const absConfig = join(root, relConfig)
+  const gate = { yolo }
   const appProfile = detectAppProfile(root)
   const gitState = readGitState(root)
 
@@ -44,8 +46,8 @@ export function readCarapaceStatus({
       capabilities: resolveCapabilities({}, appProfile),
     }
     const { stage, options } = buildStageAndOptions(base)
-    const preflight = evaluatePromptConflicts({ ...base, stage, options }, prompt)
-    return { ...base, stage, options, preflight }
+    const preflight = evaluatePromptConflicts({ ...base, stage, options, gate }, prompt)
+    return { ...base, stage, options, preflight, gate }
   }
 
   const config = readConfigObject(root, relConfig)
@@ -75,8 +77,8 @@ export function readCarapaceStatus({
       capabilities: resolveCapabilities({}, appProfile),
     }
     const { stage, options } = buildStageAndOptions(base)
-    const preflight = evaluatePromptConflicts({ ...base, stage, options }, prompt)
-    return { ...base, stage, options, preflight }
+    const preflight = evaluatePromptConflicts({ ...base, stage, options, gate }, prompt)
+    return { ...base, stage, options, preflight, gate }
   }
 
   const parsed = parseRegisterStatus(readFileSync(absCanonical, 'utf8'))
@@ -114,7 +116,7 @@ export function readCarapaceStatus({
   const label = legacyCanonical
     ? `${parsed.label} (migrate ${legacyCanonical} -> ${CANONICAL_PLAN_PATH})`
     : parsed.label
-  const withStage = { ...base, label, nextPrompt, stage, options }
+  const withStage = { ...base, label, nextPrompt, stage, options, gate }
   const preflight = evaluatePromptConflicts(withStage, prompt)
   const result = { ...withStage, preflight }
 

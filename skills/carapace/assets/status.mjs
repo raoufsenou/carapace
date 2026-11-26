@@ -23,7 +23,7 @@ function main() {
     return 2
   }
   try {
-    const status = readCarapaceStatus(plan)
+    const status = readCarapaceStatus({ ...plan, yolo: plan.yolo ?? true })
     if (plan.json) {
       const payload = { ...status, rows: compactRowsForJson(status.rows) }
       process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
