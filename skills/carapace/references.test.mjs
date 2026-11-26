@@ -9,7 +9,7 @@ const skill = readFileSync(join(here, 'SKILL.md'), 'utf8')
 
 test('every workflow reference in SKILL.md resolves one level deep', () => {
   const refs = [...skill.matchAll(/`references\/([\w.-]+\.md)`/g)].map((match) => match[1])
-  for (const expected of ['setup.md', 'audit.md', 'decide.md', 'run.md', 'capabilities.md']) {
+  for (const expected of ['setup.md', 'audit.md', 'decide.md', 'run.md', 'requirements.md', 'capabilities.md']) {
     assert.ok(refs.includes(expected), `SKILL.md must point to references/${expected}`)
   }
   for (const ref of refs) {

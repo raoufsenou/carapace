@@ -22,8 +22,9 @@ Before closure, enumerate requirements from all authoritative sources:
 - required manual, device, external-system and interoperability gates; and
 - current definitions of every interface the implementation uses.
 
-Assign stable IDs such as `REQ-ISSUE-HTTPS-VCT`. Do not derive the list from what was implemented. If two
-sources conflict, stop for a decision instead of choosing the convenient requirement.
+Assign stable IDs such as `REQ-ISSUE-HTTPS-VCT`. When Carapace ran the task, reuse the IDs and sources from
+its locked pre-run brief rather than freezing a second list at closure. Do not derive the list from what was
+implemented. If two sources conflict, stop for a decision instead of choosing the convenient requirement.
 
 Every requirement states one observable assertion. Compound prose should be split when its parts can
 pass or fail independently.

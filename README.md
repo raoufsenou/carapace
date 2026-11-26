@@ -31,7 +31,7 @@ claude plugin install carapace --marketplace /path/to/carapace
 
 ## Command Surface (One Slash Command: `/carapace`)
 
-Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. There are six documented actions: bare `/carapace`, `/carapace <prompt>`, `setup`, `audit`, `decide`, and `run`. In OpenCode the command is a generated `commands/carapace.md` that loads the `carapace` skill; in Codex and Cursor the same playbook is available as a skill without the slash command.
+Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. There are six routine actions: bare `/carapace`, `/carapace <prompt>`, `setup`, `audit`, `decide`, and `run`. A seventh, maintainer-only lock action is used when you explicitly freeze requirements for a ticket. In OpenCode the command is a generated `commands/carapace.md` that loads the `carapace` skill; in Codex and Cursor the same playbook is available as a skill without the slash command.
 
 ```text
 /carapace [<prompt or action>]
@@ -50,6 +50,7 @@ Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. There 
      - **Execute plan** (`/carapace run <ID>`): executes the current `NOW` step or a maintainer-directed `VALIDATION` `Batch:` across git worktrees using `fanout.mjs`, `carapace-*` workers, adversarial review, and semantic closure proofs. `/carapace run <ID1> <ID2> … in parallel` is the same command with a directed fan-out instruction.
 
 3. **Options, not commands**: `verify`, `plan`, `preempt`, `reconcile shared findings`, and `apply accepted findings for <target>` are numbered options emitted by status or preflight; `report` is a step inside the audit lifecycle. None are actions to memorize. Older tokens (`next`, `prompt`, `advise`, `init`, `migrate`, `verdicts`) are still understood as natural input, but the playbook documents one name per action.
+4. **Requirements brief and yolo**: every run first shows a short brief read from the ticket's locked design authority (REQ ids and statements, source and lock date, non-goals). Yolo is the default: preflight runs, the brief is shown, and the run proceeds without waiting — even when the brief says no authority is locked. Pass `--no-yolo` to make preflight and the brief stop for your review or amendments; a missing authority then becomes a blocking `requirements-not-locked` decision. Yolo never waives approval for changing requirements or product priority. Requirements are locked only when you explicitly ask, via `/carapace lock in the requirements for <ID>`.
 
 ## Capability profiles
 

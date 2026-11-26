@@ -61,7 +61,7 @@ The progress bar (`mcp__carapace__progress`), harness checklists, and `status.mj
 Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. Always start by running the deterministic state & preflight inspector:
 
 ```bash
-node <carapace-skill-path>/assets/status.mjs --root <repo> --json [--prompt "<$ARGUMENTS>"]
+node <carapace-skill-path>/assets/status.mjs --root <repo> --json [--prompt "<$ARGUMENTS>"] [--no-yolo]
 ```
 
 ### Form 1: Bare `/carapace` — Interactive Control Menu & Advisor
@@ -75,13 +75,17 @@ When `$ARGUMENTS` is empty (or asks what to do next / asks for a prompt or fan-o
 
 ### Form 2: `/carapace <prompt>` — Preflight Conflict Check -> Execute
 When `$ARGUMENTS` contains any instruction (either natural language like `/carapace audit the checkout screens`, `/carapace fix the login timeout`, or a known action like `/carapace run <ID>`, `/carapace decide <app>`, `/carapace setup`):
-1. Check `preflight` in the output of `node <carapace-skill-path>/assets/status.mjs --root <repo> --json --prompt "<$ARGUMENTS>"`.
-2. **If `preflight.hasConflict` is `true`** (unless the user's prompt explicitly chose one of the conflict resolution options, such as `preempt` or `proceed without`):
+1. If `$ARGUMENTS` contains `--no-yolo`, pass that flag through to `status.mjs` and omit it from the text given to `--prompt`. `gate.yolo` in the result tells you which mode applies: true by default, false only for `--no-yolo`.
+2. Check `preflight` in the output of `node <carapace-skill-path>/assets/status.mjs --root <repo> --json --prompt "<$ARGUMENTS>" [--no-yolo]`.
+3. **If `preflight.hasConflict` is `true`** (unless the user's prompt explicitly chose one of the conflict resolution options, such as `preempt` or `proceed without`):
    - **Stop before mutating any file.**
    - State the exact conflict from `preflight.conflicts` (e.g. an interrupted step with closure artifacts already on disk, active batch worktrees that must be merged first, unreconciled multi-app audits before per-app verdicts, undecided audit findings before applying fixes, a shared prerequisite step blocking immediate parallel fan-out, or an existing `NOW` task in the register).
    - Present the numbered resolution options from `preflight.conflicts[0].options` with **`1. ... (Recommended)`** first, and wait for the user's choice.
-3. **If `preflight.hasConflict` is `false`**:
+4. **If `preflight.hasConflict` is `false`**:
    - Route directly to the matching workflow below (`Mode 1: Setup`, `Mode 2A: Audit / Reconcile`, `Mode 2B: Decide Verdicts`, or `Mode 3: Run / Execute`) and execute it.
+5. **Requirements brief (every run)**: Before any run, read `requirements` from the same JSON and always show a short brief: task ID, each `REQ-…` id with its statement, the source path and lock date, and the non-goals. If `status` is not `LOCKED`, say so plainly in the brief and include `preflight.warnings[n].message` — a missing authority is a warning in yolo mode, not a blocking conflict. Then:
+   - `gate.yolo === true` (default): proceed with the run immediately after showing the brief. Do not ask a question or wait for a reply.
+   - `gate.yolo === false` (`--no-yolo`): a missing authority becomes the `requirements-not-locked` conflict; stop and wait for the maintainer's review. If they propose changes, route to the requirements-locking workflow in `references/requirements.md`; proceed only after they approve the brief.
 
 ---
 
@@ -99,6 +103,7 @@ The root playbook, its invariants, entry dispatch, and harness rules always appl
 - `audit` (including reconcile and report steps inside the audit lifecycle) -> `references/audit.md`
 - `decide` -> `references/decide.md`
 - `run <ID>` (single task, or a maintainer-directed parallel batch) -> `references/run.md`
+- locking a ticket's requirements and its frozen REQ IDs -> `references/requirements.md`
 - project type and opted-in capabilities -> `references/capabilities.md`
 
 ## 5. Close & Next Step Suggestion
