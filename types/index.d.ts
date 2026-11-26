@@ -14,7 +14,6 @@ export type Flow = {
   phase: Phase
   isFinished: boolean
   isFromRegister?: boolean
-  nextPrompt?: string
   tasks: PlannedTask[]
 }
 

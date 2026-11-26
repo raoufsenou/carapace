@@ -12,6 +12,9 @@ const panel = atom({ plugin: 'carapace', key: 'panel' } as const, {
 })
 const now = atom({ plugin: 'carapace', key: 'now' } as const, 0)
 const liveTools = atom({ plugin: 'carapace', key: 'liveTools' } as const, { broken: false } satisfies LiveTools)
+// Synchronous guard: a check-and-set with no await between them, so two hook
+// events firing together cannot both announce the same command.
+let lastSuggestedText = ''
 
 const TOOL = 'mcp__carapace__progress'
 const STEP_TOOL = 'mcp__carapace__step'
@@ -37,6 +40,9 @@ const TIERS: readonly string[] = ['fable', 'heavy', 'careful', 'medium', 'light'
 const MAX_TASKS = 200
 const MAX_AFTER = 20
 const MAX_TITLE = 120
+// Commands (fan-out prompts with several long IDs) must never be clipped: a
+// truncated `Next →` command cannot be accepted with Tab or the button.
+const MAX_PROMPT = 1000
 const ACCENT = '#8f8cf4'
 const DONE = '#5fbf8f'
 
@@ -117,7 +123,7 @@ const cleanTasks = (tasks: ProgressInput['tasks']): PlannedTask[] | undefined =>
 const cleanNextPrompt = (v: unknown): string | undefined => {
   if (typeof v !== 'string') return undefined
   const trimmed = v.replace(/\s+/g, ' ').trim()
-  return trimmed ? clip(trimmed, MAX_TITLE) : ''
+  return trimmed ? clip(trimmed, MAX_PROMPT) : ''
 }
 
 const merge = (prev: Flow | null, input: ProgressInput): Flow => {
@@ -127,7 +133,6 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
   const total = Math.min(MAX_TASKS, Math.max(0, Math.round(input.total ?? (input.tasks ? tasks.length : base.total))))
   const done = Math.min(total || Infinity, Math.max(0, Math.round(input.done ?? base.done)))
   const phase = input.phase && PHASES.includes(input.phase) ? input.phase : base.phase
-  const nextPrompt = cleanNextPrompt(input.nextPrompt)
   return {
     ...base,
     title: clip(input.title?.trim() || base.title, MAX_TITLE),
@@ -135,7 +140,6 @@ const merge = (prev: Flow | null, input: ProgressInput): Flow => {
     done,
     phase: input.finished ? 'close' : phase,
     isFinished: input.finished === true,
-    nextPrompt: nextPrompt !== undefined ? (nextPrompt || undefined) : base.nextPrompt,
     tasks,
   }
 }
@@ -404,50 +408,10 @@ const stripTicks = (s: string): string => {
   return t.startsWith('`') && t.endsWith('`') && t.length >= 2 ? t.slice(1, -1).trim() : t
 }
 
-const stripFormatting = (s: string): string =>
-  s.trim().replace(/^(?:`|\*)+|(?:`|\*)+$/g, '').trim()
-
-const findUnmigratedQueueNow = (md: string, start: number, end: number): string | null => {
-  const outside = `${md.slice(0, start)}\n${md.slice(end + REGISTER_END.length)}`
-  let idCol = -1
-  let stateCol = -1
-  let lastNowId: string | null = null
-
-  for (const raw of outside.split(/\r?\n/)) {
-    const line = raw.trim()
-    if (!line.startsWith('|') || !line.endsWith('|')) {
-      idCol = -1
-      stateCol = -1
-      continue
-    }
-    const cells = line.slice(1, -1).split('|').map(c => c.trim())
-    if (cells.every(c => /^:?-{3,}:?$/.test(c))) continue
-    const headerState = cells.findIndex(c => /^state$/i.test(stripFormatting(c)))
-    const headerId = cells.findIndex(c => /^(?:id|step|task)$/i.test(stripFormatting(c)))
-    if (headerState !== -1 && headerId !== -1) {
-      idCol = headerId
-      stateCol = headerState
-      continue
-    }
-    if (idCol !== -1 && stateCol !== -1 && stateCol < cells.length && idCol < cells.length) {
-      if (stripFormatting(cells[stateCol] ?? '') === 'NOW') {
-        const candidate = stripFormatting(cells[idCol] ?? '')
-        if (candidate) lastNowId = candidate
-      }
-    }
-  }
-  return lastNowId
-}
-
-type RegisterSync = {
-  finished: boolean
-  nextPrompt: string
-}
-
-// Reads the bounded `<!-- execution-register:start/end -->` block from an
-// execution-plan-integrity canonical document to suggest the next /carapace command
-// without hijacking the live AbovePrompt flow bar with static plan rows.
-const parseRegister = (md: string): RegisterSync | null => {
+// Reads the bounded `<!-- execution-register:start/end -->` block only to close
+// the live bar when the register is fully done. It never produces a command:
+// `status.mjs` is the sole producer of the next /carapace prompt.
+const parseRegister = (md: string): boolean | null => {
   const start = md.indexOf(REGISTER_START)
   const end = md.indexOf(REGISTER_END)
   if (start === -1 || end === -1 || end <= start) return null
@@ -472,32 +436,8 @@ const parseRegister = (md: string): RegisterSync | null => {
   }
   if (!rows.length && nowId !== 'IDLE' && nowId !== 'NONE') return null
 
-  const total = rows.length
-  const done = rows.filter(r => r.state === 'DONE').length
-  const unmigratedNow = findUnmigratedQueueNow(md, start, end)
-  if (unmigratedNow) {
-    return {
-      finished: false,
-      nextPrompt: '/carapace setup',
-    }
-  }
-  if (nowId === 'NONE') {
-    return {
-      finished: total > 0 && done === total,
-      nextPrompt: '/carapace',
-    }
-  }
-  if (nowId === 'IDLE') {
-    return {
-      finished: total > 0 && done === total,
-      nextPrompt: '/carapace',
-    }
-  }
-
-  return {
-    finished: false,
-    nextPrompt: `/carapace run ${nowId}`,
-  }
+  if (nowId !== 'NONE' && nowId !== 'IDLE') return false
+  return rows.length > 0 && rows.every(r => r.state === 'DONE')
 }
 
 const modelName = (id: string): string => {
@@ -910,119 +850,29 @@ async function autoOpen($: EngineInterface, key: string): Promise<void> {
 }
 
 async function suggestNext($: EngineInterface, text: string | undefined): Promise<void> {
-  if (!text) return
-  await $.prompt.suggest({ text }).catch(() => null)
+  const clean = cleanNextPrompt(text)
+  if (!clean || clean === lastSuggestedText) return
+  lastSuggestedText = clean
+  await $.prompt.suggest({ text: clean }).catch(() => null)
 }
 
-async function hasOpenAuditFindings($: EngineInterface, filePath: string): Promise<boolean> {
-  try {
-    const raw = await $.fs.read(filePath)
-    const parsed = JSON.parse(raw) as {
-      raised?: unknown[]
-      findings?: unknown[]
-      reopens?: unknown[]
-      rechecked?: { outcome?: string }[]
-    }
-    if (!parsed || typeof parsed !== 'object') return true
-    const hasAuditArrays =
-      Array.isArray(parsed.raised) ||
-      Array.isArray(parsed.findings) ||
-      Array.isArray(parsed.reopens) ||
-      Array.isArray(parsed.rechecked)
-    if (!hasAuditArrays) return true
-    const raisedCount = Array.isArray(parsed.raised)
-      ? parsed.raised.length
-      : Array.isArray(parsed.findings)
-        ? parsed.findings.length
-        : 0
-    const reopensCount = Array.isArray(parsed.reopens) ? parsed.reopens.length : 0
-    const failedRechecks = Array.isArray(parsed.rechecked)
-      ? parsed.rechecked.filter(r => r && r.outcome !== 'holds').length
-      : 0
-    return raisedCount + reopensCount + failedRechecks > 0
-  } catch {
-    return true
-  }
-}
-
-async function syncRegister($: EngineInterface, editedFile?: string): Promise<void> {
+// The hook never derives a command from plan rows. `status.mjs` is the only
+// producer of a next command; the `progress` tool is the only channel into the
+// UI. This function's sole job is to close the bar when every row is DONE.
+async function syncRegister($: EngineInterface): Promise<void> {
   try {
     const rawCfg = await $.fs.read(REGISTER_CONFIG)
     const cfg = JSON.parse(rawCfg) as { canonical?: unknown }
     if (typeof cfg.canonical !== 'string' || !cfg.canonical.trim()) return
-    const canonicalPath = cfg.canonical.trim().replace(/^\.\//, '')
-    const md = await $.fs.read(canonicalPath)
-    const parsed = parseRegister(md)
-    if (!parsed) return
-    if (canonicalPath !== 'docs/execution-plan.md') {
-      parsed.nextPrompt = '/carapace setup'
-    }
-    const prevPanel = await read($, panel)
-    const auditVersionEdit = /docs\/audit\/(?:ui|non-ui)\/([^/]+)\/v\d+\.json$/.exec(editedFile ?? '')
-    const auditVerdictsEdit = /docs\/audit\/(?:ui|non-ui)\/([^/]+)\/v\d+-verdicts\.json$/.exec(editedFile ?? '')
-    let hasOpenFindings = false
-    if (auditVersionEdit?.[1] && parsed.nextPrompt === '/carapace' && editedFile) {
-      hasOpenFindings = await hasOpenAuditFindings($, editedFile)
-      if (hasOpenFindings) {
-        parsed.nextPrompt = `/carapace decide ${auditVersionEdit[1]}`
-      }
-    } else if (
-      !editedFile &&
-      !auditVerdictsEdit &&
-      prevPanel.registerPrompt?.startsWith('/carapace decide ') &&
-      parsed.nextPrompt === '/carapace'
-    ) {
-      parsed.nextPrompt = prevPanel.registerPrompt
-    }
-    const promptChanged = prevPanel.registerPrompt !== parsed.nextPrompt
-    await update($, panel, prev => ({ ...prev, registerPrompt: parsed.nextPrompt }))
-    const editedCanonical =
-      typeof editedFile === 'string' &&
-      editedFile.length > 0 &&
-      (editedFile.endsWith(canonicalPath) ||
-        editedFile.endsWith(REGISTER_CONFIG) ||
-        Boolean(auditVerdictsEdit) ||
-        (Boolean(auditVersionEdit) && hasOpenFindings))
+    const md = await $.fs.read(cfg.canonical.trim().replace(/^\.\//, ''))
+    if (parseRegister(md) !== true) return
     const current = await read($, flow)
-    if (current && !current.isFinished) {
-      if (parsed.finished) {
-        const next = await update($, flow, prev =>
-          prev
-            ? {
-                ...prev,
-                done: prev.total,
-                phase: 'close',
-                isFinished: true,
-                nextPrompt: prev.nextPrompt || parsed.nextPrompt,
-              }
-            : prev,
-        )
-        await suggestNext($, next?.nextPrompt ?? parsed.nextPrompt)
-      } else if (editedCanonical || !current.nextPrompt) {
-        await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
-        if (editedCanonical || promptChanged) await suggestNext($, parsed.nextPrompt)
-      }
-      return
-    }
-    if (current && current.isFinished) {
-      if (editedCanonical || !current.nextPrompt) {
-        await update($, flow, prev => (prev ? { ...prev, nextPrompt: parsed.nextPrompt } : prev))
-        if (editedCanonical || promptChanged) await suggestNext($, parsed.nextPrompt)
-      }
-      return
-    }
-    if (editedCanonical || promptChanged) {
-      await suggestNext($, parsed.nextPrompt)
-    }
+    if (!current || current.isFinished) return
+    await update($, flow, prev =>
+      prev ? { ...prev, done: prev.total, phase: 'close', isFinished: true } : prev,
+    )
   } catch {
-    if (editedFile === '__status_check__') {
-      const prevPanel = await read($, panel)
-      const fallbackPrompt = prevPanel.registerPrompt || '/carapace setup'
-      if (!prevPanel.registerPrompt) {
-        await update($, panel, prev => ({ ...prev, registerPrompt: fallbackPrompt }))
-      }
-      await suggestNext($, fallbackPrompt)
-    }
+    return
   }
 }
 
@@ -1046,13 +896,15 @@ async function answerProgress($: EngineInterface, e: { agentId?: string }): Prom
     const prev = await read($, flow)
     if (isNewFlow(prev, input) && !input.finished) {
       await update($, agents, list => list.filter(a => a.status === 'running'))
-      await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '' }))
+      // A new run must not keep the previous run's command on screen.
+      await update($, panel, p => ({ ...p, isRoundDone: false, autoOpenedFor: '', registerPrompt: undefined }))
     }
     const next = await update($, flow, p => ({ ...merge(p, input), isFromRegister: false }))
     if (next && (input.tasks?.length ?? 0) > 1) await autoOpen($, next.title)
-    if (next?.nextPrompt && (input.nextPrompt !== undefined || next.isFinished)) {
-      await update($, panel, p => ({ ...p, registerPrompt: next.nextPrompt }))
-      await suggestNext($, next.nextPrompt)
+    const explicit = cleanNextPrompt(input.nextPrompt)
+    if (explicit) {
+      await update($, panel, p => ({ ...p, registerPrompt: explicit }))
+      await suggestNext($, explicit)
     }
     return { result: `ok: ${label(next ?? blank())}` }
   } catch (err) {
@@ -1123,13 +975,15 @@ async function pruneCompletedRoundIfIdle($: EngineInterface): Promise<void> {
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    // A new session may legitimately re-offer the same command.
+    lastSuggestedText = ''
     await syncRegister($)
     await $.tool.register({
       name: 'progress',
       description:
         'Report /carapace progress to the progress bar above the prompt and the agents panel. ' +
         'Call it after presenting the plan (title, total, tasks, phase "delegate"), each time a task is accepted (done), ' +
-        'when switching phase or re-planning (tasks), and once at the end with finished: true (and optional nextPrompt). Fields left out keep their previous value. ' +
+        'when switching phase or re-planning (tasks), and once at the end with finished: true. Fields left out keep their previous value. Pass nextPrompt only on the call that closes a run; omit it on every other call, and it will not be shown. ' +
         'For the main session only: a call from a subagent is ignored (workers report with `mcp__carapace__step`).',
       inputSchema: {
         type: 'object',
@@ -1195,16 +1049,6 @@ export const register: Register = (on, options) => {
     return started
   })
 
-  on('prompt.suggest', async ($, e, next) => {
-    const f = await read($, flow)
-    const p = await read($, panel)
-    const nextCmd = f?.nextPrompt ?? p.registerPrompt
-    if (nextCmd && e.origin.kind !== 'plugin') {
-      return next({ ...e, text: nextCmd })
-    }
-    return next(e)
-  })
-
   // Wire-name filters (what the unanswered-hook error tells plugins to register) plus short names.
   on('tool.call', { tool: TOOL }, async ($, e) => answerProgress($, e))
   on('tool.call', { tool: 'progress' }, async ($, e) => answerProgress($, e))
@@ -1218,7 +1062,7 @@ export const register: Register = (on, options) => {
     return next(e)
   })
 
-  // Refresh the canonical execution-register suggestion when the main session edits files or runs commands.
+  // Recheck the register after main-session writes so the bar closes when every row is DONE.
   for (const tool of ['Write', 'Edit', 'MultiEdit', 'Bash'] as const) {
     on('tool.call', { tool }, async ($, e, next) => {
       if (!e.agentId) {
@@ -1226,10 +1070,7 @@ export const register: Register = (on, options) => {
         if (p.isRoundDone) await pruneCompletedRoundIfIdle($)
       }
       const res = await next(e)
-      const filePath = typeof (e as { file_path?: unknown }).file_path === 'string' ? String((e as { file_path?: unknown }).file_path) : undefined
-      const cmd = typeof (e as { command?: unknown }).command === 'string' ? String((e as { command?: unknown }).command) : ''
-      const syncHint = filePath ?? (cmd.includes('status.mjs') ? '__status_check__' : undefined)
-      if (!e.agentId) await syncRegister($, syncHint)
+      if (!e.agentId) await syncRegister($)
       return res
     })
   }
@@ -1416,9 +1257,8 @@ export const register: Register = (on, options) => {
       }
     }
     const done = await next(e)
-    const [latestFlow, latestPanel] = await Promise.all([read($, flow), read($, panel)])
-    const nextCmd = latestFlow?.nextPrompt ?? latestPanel.registerPrompt
-    if (nextCmd) await suggestNext($, nextCmd)
+    const p = await read($, panel)
+    if (p.registerPrompt) await suggestNext($, p.registerPrompt)
     return done
   })
 
@@ -1457,7 +1297,7 @@ export const register: Register = (on, options) => {
     )
     const isEmpty = list.length === 0 && planned.length === 0
     const summary = `≈${fmtCost(t.cost)}, ${fmtTokens(t.tokens)} ${s.tokensWord}, ${fmtTime(t.time)}`
-    const nextCmd = f?.nextPrompt ?? p.registerPrompt
+    const nextCmd = p.registerPrompt
     const nextButton = nextCmd ? (
       <Button
         key="carapace-next"

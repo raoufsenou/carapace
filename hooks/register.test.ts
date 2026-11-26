@@ -73,7 +73,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(started).toMatchObject({ result: 'ok: Tasks 0/3' })
   })
 
-  test(`${surface}: syncs nextPrompt with .execution-plan-integrity.json without populating AbovePrompt from static plan rows`, async ($, on) => {
+  test(`${surface}: only an explicit progress nextPrompt becomes a command; plan edits never invent one`, async ($, on) => {
     let canonicalMd = `<!-- execution-role: canonical -->
 <!-- execution-register:start -->
 \`NOW\`: \`UI-APPLY-24-VERIFIER\`
@@ -82,7 +82,6 @@ for (const surface of ['terminal', 'desktop'] as const) {
 | --- | --- | --- | --- | --- | --- |
 | 1 | \`UI-APPLY-23\` | \`IMPLEMENTATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-23.json. | Audit v1 |
 | 2 | \`UI-APPLY-24-VERIFIER\` | \`IMPLEMENTATION\` | \`NOW\` | Close verifier findings in apps/verifier. | Audit v1 |
-| 3 | \`UI-APPLY-25-WEB\` | \`IMPLEMENTATION\` | \`QUEUED\` | Apply web dashboard spacing fixes. | Audit v1 |
 <!-- execution-register:end -->`
 
     const suggested: string[] = []
@@ -94,115 +93,74 @@ for (const surface of ['terminal', 'desktop'] as const) {
       if (e.path.endsWith('.execution-plan-integrity.json')) {
         return { value: JSON.stringify({ schema: 2, canonical: 'docs/execution-plan.md' }) } as never
       }
-      if (e.path.endsWith('docs/execution-plan.md')) {
-        return { value: canonicalMd } as never
-      }
-      if (e.path.endsWith('docs/audit/ui/web/v2.json')) {
-        return {
-          value: JSON.stringify({
-            date: '2026-10-16',
-            commit: '2222222',
-            scope: 'Re-audit',
-            report: 'docs/audit/ui/web/reports/v2/review.html',
-            rechecked: [{ finding: 'A1', outcome: 'holds', observed: 'Holds' }],
-            raised: [],
-          }),
-        } as never
-      }
+      if (e.path.endsWith('docs/execution-plan.md')) return { value: canonicalMd } as never
       throw new Error(`ENOENT: ${e.path}`)
     })
     on('tool.call', { tool: 'Edit' }, async () => ({ result: 'edited' }) as never)
     on('tool.call', { tool: 'Bash' }, async () => ({ result: 'committed' }) as never)
+    on('turn.complete', () => ({ text: '' }) as never)
     on('ui.render', { component: 'AbovePrompt' }, (_$, e) => {
       const { Box } = _$.ui.resolve(e)
       return Box({})
     })
 
+    // Static plan rows create neither a bar, a button, nor a suggestion.
     await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
-
-    // Static plan rows must not show an AbovePrompt bar before /carapace starts a flow.
+    expect(suggested).toEqual([])
     const bar1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     expect(await bar1.find({ key: 'carapace-agents' })).toBeUndefined()
-    expect(suggested.at(-1)).toBe('/carapace run UI-APPLY-24-VERIFIER')
-
+    await bar1.unmount()
     const panel1 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
-    expect((await panel1.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run UI-APPLY-24-VERIFIER')
-    expect(await panel1.find({ text: /Planned/ })).toBeUndefined()
+    expect(await panel1.find({ key: 'carapace-next' })).toBeUndefined()
     await panel1.unmount()
 
-    // Transition step 24 to DONE and form a Batch over step 25.
-    canonicalMd = `<!-- execution-role: canonical -->
-<!-- execution-register:start -->
-\`NOW\`: \`UI-APPLY-BATCH-1\`
+    await $.tool.call({ tool: PROGRESS, title: 'Run verifier', total: 1, done: 0 } as never)
+    expect(suggested).toEqual([])
 
-| Order | ID | Kind | State | Work and completion boundary | Source or evidence |
-| --- | --- | --- | --- | --- | --- |
-| 1 | \`UI-APPLY-23\` | \`IMPLEMENTATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-23.json. | Audit v1 |
-| 2 | \`UI-APPLY-24-VERIFIER\` | \`IMPLEMENTATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-24-VERIFIER.json. | Audit v1 |
-| 3 | \`UI-APPLY-BATCH-1\` | \`VALIDATION\` | \`NOW\` | Batch: from \`abc1234\`; web applies \`UI-APPLY-25-WEB\` on branch \`ui-apply/web\` in worktree \`../wt/web\`, owning \`apps/web\`. | Maintainer direction |
-| 4 | \`UI-APPLY-25-WEB\` | \`IMPLEMENTATION\` | \`QUEUED\` | Apply web dashboard spacing fixes. | Audit v1 |
-<!-- execution-register:end -->`
-
-    await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
-    expect(suggested.at(-1)).toBe('/carapace run UI-APPLY-BATCH-1')
-
-    const panelUi = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
-    expect((await panelUi.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run UI-APPLY-BATCH-1')
-    await panelUi.unmount()
-
-    // When a flow finishes with an explicit nextPrompt, running Bash (e.g. git commit) preserves it.
+    // The closing call supplies the one authoritative command.
     await $.tool.call({
       tool: PROGRESS,
-      title: 'Run UI-APPLY-24-VERIFIER',
+      title: 'Run verifier',
       phase: 'close',
       total: 1,
       done: 1,
       finished: true,
       nextPrompt: '/carapace run APP-AUDIT-FRAME',
     } as never)
+    expect(suggested).toEqual(['/carapace run APP-AUDIT-FRAME'])
+    const panel2 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await panel2.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run APP-AUDIT-FRAME')
+    await panel2.unmount()
+
+    // Neither a commit, an audit-file edit, nor a turn completion re-announces or clobbers it.
     await $.tool.call({ tool: 'Bash', command: 'git commit -m "chore: checkpoint"' } as never)
-    expect(suggested.at(-1)).toBe('/carapace run APP-AUDIT-FRAME')
-
-    // Reaching NOW: NONE during an active flow finishes the bar and suggests /carapace.
-    await $.tool.call({ tool: PROGRESS, title: 'Run UI-APPLY-BATCH-1', phase: 'review', total: 2, done: 1 } as never)
-    canonicalMd = `<!-- execution-role: canonical -->
-<!-- execution-register:start -->
-\`NOW\`: \`NONE\`
-
-| Order | ID | Kind | State | Work and completion boundary | Source or evidence |
-| --- | --- | --- | --- | --- | --- |
-| 1 | \`UI-APPLY-23\` | \`IMPLEMENTATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-23.json. | Audit v1 |
-| 2 | \`UI-APPLY-BATCH-1\` | \`VALIDATION\` | \`DONE\` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-BATCH-1.json. | Audit v1 |
-<!-- execution-register:end -->`
-    await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
-    expect(suggested.at(-1)).toBe('/carapace')
-    const panelDone = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
-    expect((await panelDone.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace')
-    await panelDone.unmount()
-
-    // Writing a new audit version while the register is NONE suggests deciding verdicts for that target,
-    // and a subsequent Bash check command does not clobber that pending decide suggestion.
     await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v1.json' } as never)
-    expect(suggested.at(-1)).toBe('/carapace decide web')
-    await $.tool.call({ tool: 'Bash', command: 'node check-records.mjs docs/audit/ui' } as never)
-    expect(suggested.at(-1)).toBe('/carapace decide web')
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'done' })
+    expect(suggested).toEqual(['/carapace run APP-AUDIT-FRAME'])
+    const panel3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await panel3.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run APP-AUDIT-FRAME')
+    await panel3.unmount()
 
-    // Writing a zero-finding re-audit (v2.json with raised: [] and all rechecked holding) does not falsely suggest decide.
-    await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v1-verdicts.json' } as never)
-    expect(suggested.at(-1)).toBe('/carapace')
-    const countBeforeCleanAudit = suggested.length
-    await $.tool.call({ tool: 'Edit', file_path: 'docs/audit/ui/web/v2.json' } as never)
-    expect(suggested.length).toBe(countBeforeCleanAudit)
-    expect(suggested.at(-1)).toBe('/carapace')
+    // A new run clears the previous command until its own closing call supplies one.
+    await $.tool.call({ tool: PROGRESS, title: 'Run batch', phase: 'review', total: 2, done: 1 } as never)
+    const panel4 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect(await panel4.find({ key: 'carapace-next' })).toBeUndefined()
+    await panel4.unmount()
 
+    // All rows DONE closes the bar from the register, without inventing a command.
+    canonicalMd = canonicalMd
+      .replace('`NOW`: `UI-APPLY-24-VERIFIER`', '`NOW`: `NONE`')
+      .replace('| `NOW` | Close verifier findings in apps/verifier. | Audit v1 |', '| `DONE` | Completed 2026-10-14; docs/execution-proofs/UI-APPLY-24-VERIFIER.json. | Audit v1 |')
+    await $.tool.call({ tool: 'Edit', file_path: 'docs/execution-plan.md' } as never)
+    expect(suggested).toEqual(['/carapace run APP-AUDIT-FRAME'])
     const bar3 = await $.ui.mount({ plugin: PLUGIN, surface, component: 'AbovePrompt', props: band })
     if (surface === 'terminal') {
       expect(await bar3.find({ text: /Done/ })).toBeDefined()
     } else {
       const svg = await bar3.find({ type: 'Svg' })
       expect(String(svg?.props.source)).toContain('Done')
-      expect(String(svg?.props.source)).toContain('100%')
     }
+    await bar3.unmount()
   })
 
   test(`${surface}: a single subagent does not auto-open the Agents panel, while a multi-worker run does`, async ($, on) => {
@@ -478,7 +436,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await panelFinalReview.unmount()
   })
 
-  test(`${surface}: suppresses AbovePrompt bar for zero-task status checks and re-suggests nextPrompt on turn.complete`, async ($, on) => {
+  test(`${surface}: zero-task status checks do not repeat an unchanged next prompt after a turn`, async ($, on) => {
     const suggested: string[] = []
     on('prompt.suggest', async (_$, e) => {
       if (e.text) suggested.push(e.text)
@@ -506,7 +464,137 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     suggested.length = 0
     await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'status reported' })
-    expect(suggested).toEqual(['/carapace setup'])
+    // The same open step stays open: the command was already offered, so stay quiet.
+    expect(suggested).toEqual([])
+
+    // A genuinely different command is still offered once.
+    await $.tool.call({
+      tool: 'mcp__carapace__progress',
+      title: 'Carapace Status',
+      phase: 'plan',
+      total: 0,
+      done: 0,
+      finished: true,
+      nextPrompt: '/carapace run NEW-STEP',
+    } as never)
+    expect(suggested).toEqual(['/carapace run NEW-STEP'])
+    await ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'status reported' })
+    expect(suggested).toEqual(['/carapace run NEW-STEP'])
+  })
+
+  test(`${surface}: concurrent turn completions cannot duplicate a suggestion`, async ($, on) => {
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      if (e.text) suggested.push(e.text)
+      return { isShown: true }
+    })
+    on('turn.complete', () => ({ text: '' }) as never)
+
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Run RACE-STEP',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace run RACE-STEP',
+    } as never)
+    await Promise.all([
+      ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'a' }),
+      ($.turn.complete as (e: unknown) => Promise<unknown>)({ reason: 'answer', answer: 'b' }),
+    ])
+    expect(suggested).toEqual(['/carapace run RACE-STEP'])
+  })
+
+  test(`${surface}: a long fan-out next prompt is never clipped`, async ($, on) => {
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      if (e.text) suggested.push(e.text)
+      return { isShown: true }
+    })
+    on('ui.render', { component: 'AbovePrompt' }, (_$, e) => {
+      const { Box } = _$.ui.resolve(e)
+      return Box({})
+    })
+
+    const steps = Array.from({ length: 40 }, (_, i) => `STEP-${String(i).padStart(2, '0')}`)
+    const cmd = `/carapace run ${steps.join(' ')} in parallel`
+    expect(cmd.length).toBeGreaterThan(120)
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Fan out',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: cmd,
+    } as never)
+    expect(suggested).toEqual([cmd])
+
+    const ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await ui.find({ key: 'carapace-next' }))?.props.label).toBe(`Next → ${cmd}`)
+    await ui.unmount()
+  })
+
+  test(`${surface}: an unrelated suggestion is not rewritten to the carapace command`, async ($, on) => {
+    const seen: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      seen.push(e.text)
+      return { isShown: true }
+    })
+
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Run OLD-STEP',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace run OLD-STEP',
+    } as never)
+    seen.length = 0
+    await ($.prompt.suggest as (e: unknown) => Promise<unknown>)({ text: '/compact' })
+    expect(seen).toEqual(['/compact'])
+  })
+
+  test(`${surface}: a command survives unrelated progress calls, and a new run starts clean`, async ($, on) => {
+    const suggested: string[] = []
+    on('prompt.suggest', async (_$, e) => {
+      if (e.text) suggested.push(e.text)
+      return { isShown: true }
+    })
+
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Run OLD-STEP',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace run OLD-STEP',
+    } as never)
+    await $.tool.call({ tool: PROGRESS, title: 'Run OLD-STEP', done: 1 } as never)
+    expect(suggested).toEqual(['/carapace run OLD-STEP'])
+
+    // A new run clears the previous command until its own closing call.
+    await $.tool.call({ tool: PROGRESS, title: 'Run NEW-STEP', phase: 'delegate', total: 1, done: 0 } as never)
+    let ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect(await ui.find({ key: 'carapace-next' })).toBeUndefined()
+    await ui.unmount()
+
+    await $.tool.call({
+      tool: PROGRESS,
+      title: 'Run NEW-STEP',
+      phase: 'close',
+      total: 1,
+      done: 1,
+      finished: true,
+      nextPrompt: '/carapace run NEW-STEP',
+    } as never)
+    expect(suggested).toEqual(['/carapace run OLD-STEP', '/carapace run NEW-STEP'])
+    ui = await $.ui.mount({ plugin: PLUGIN, surface, component: 'Pane', requestId: 'carapace-agents', props: pane })
+    expect((await ui.find({ key: 'carapace-next' }))?.props.label).toBe('Next → /carapace run NEW-STEP')
+    await ui.unmount()
   })
 }
 
