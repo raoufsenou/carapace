@@ -477,3 +477,59 @@ test('inspects interrupted steps, canonical app-slop-audit records, zero-finding
   assert.equal(nestedStatus.preflight.hasConflict, true)
   assert.equal(nestedStatus.preflight.conflicts[0].kind, 'uninitialized-git-subdirectory')
 })
+
+test('capability profiles gate project-type engines and preflight requests', () => {
+  const root = tempRepo()
+  const plan = [
+    '<!-- execution-role: canonical -->',
+    '<!-- execution-register:start -->',
+    '`NOW`: `P1.1`',
+    '',
+    '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| 1 | `P1.1` | `IMPLEMENTATION` | `NOW` | Write a document. | Plan |',
+    '<!-- execution-register:end -->',
+  ].join('\n')
+  write(root, 'docs/execution-plan.md', plan)
+  const config = (extra) => JSON.stringify({
+    schema: 2,
+    canonical: 'docs/execution-plan.md',
+    completionProofs: { directory: 'docs/execution-proofs' },
+    requiredGlobs: ['docs/**/*plan*.md', 'docs/**/*audit*.md'],
+    roles: {
+      evidence: ['docs/**/*audit*.md'],
+      design: ['docs/*.md'],
+      validation: ['docs/validation/*.md'],
+      archive: ['docs/archive/**/*.md'],
+    },
+    ...extra,
+  })
+
+  // Absent profile preserves the old all-on behavior.
+  write(root, '.execution-plan-integrity.json', config({}))
+  const fallback = readCarapaceStatus({ root })
+  assert.equal(fallback.capabilities.profile, 'fullstack')
+  assert.equal(fallback.capabilities.values.uiAudit.enabled, true)
+
+  write(root, '.execution-plan-integrity.json', config({ profile: 'docs-only' }))
+  const docs = readCarapaceStatus({ root, prompt: 'audit screens and UI' })
+  assert.equal(docs.capabilities.profile, 'docs-only')
+  assert.equal(docs.capabilities.values.uiAudit.enabled, false)
+  assert.equal(docs.capabilities.values.uiAudit.source, 'profile')
+  assert.equal(docs.capabilities.values.testGates.enabled, false)
+  assert.equal(docs.preflight.hasConflict, true)
+  assert.equal(docs.preflight.conflicts[0].kind, 'capability-disabled')
+  assert.match(docs.preflight.conflicts[0].message, /capabilities\.uiAudit/)
+  assert.equal(docs.preflight.conflicts[0].options[0].recommended, true)
+  // A bare audit has no scope yet, so the menu stays actionable; the scoped request is gated above.
+  assert.equal(docs.options.find((option) => option.id === 'audit')?.disabled, undefined)
+  assert.equal(docs.nextPrompt, '/carapace run P1.1')
+
+  // Explicit capabilities override the profile; drift is reported, not silently fixed.
+  write(root, '.execution-plan-integrity.json', config({ profile: 'docs-only', capabilities: { uiAudit: true } }))
+  const override = readCarapaceStatus({ root })
+  assert.equal(override.capabilities.values.uiAudit.enabled, true)
+  assert.equal(override.capabilities.values.uiAudit.source, 'explicit')
+  assert.ok(override.capabilities.drift.some((item) => item.includes('no UI files')))
+})
+

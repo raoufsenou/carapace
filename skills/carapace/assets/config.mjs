@@ -1,4 +1,5 @@
 import { isAbsolute, normalize, resolve, sep } from 'node:path'
+import { CAPABILITY_KEYS, CAPABILITY_PROFILES } from '../../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
 
 const DEFAULT_CONFIG = '.execution-plan-integrity.json'
 const DEFAULT_PROOF_DIR = 'docs/execution-proofs'
@@ -54,4 +55,23 @@ export function commandPlan(args) {
   if (prompt !== null) plan.prompt = prompt
   return plan
 }
+export function resolveCapabilities(config, appProfile = {}) {
+  const profile = config?.profile === 'custom' ? 'custom' : (config?.profile ?? 'fullstack')
+  const defaults = profile === 'custom' ? {} : (CAPABILITY_PROFILES[profile] ?? CAPABILITY_PROFILES.fullstack)
+  const explicit =
+    config?.capabilities && typeof config.capabilities === 'object' && !Array.isArray(config.capabilities)
+      ? config.capabilities
+      : {}
+  const values = {}
+  for (const key of CAPABILITY_KEYS) {
+    if (typeof explicit[key] === 'boolean') values[key] = { enabled: explicit[key], source: 'explicit' }
+    else if (typeof defaults[key] === 'boolean') values[key] = { enabled: defaults[key], source: 'profile' }
+    else values[key] = { enabled: false, source: 'default' }
+  }
+  const drift = []
+  if (values.uiAudit.enabled && !appProfile.hasUi) drift.push('uiAudit is enabled but no UI files were detected')
+  if (!values.uiAudit.enabled && appProfile.hasUi) drift.push('UI files were detected but uiAudit is disabled')
+  return { profile, profileSource: config?.profile ? 'config' : 'default', values, drift }
+}
+
 export { DEFAULT_CONFIG, DEFAULT_PROOF_DIR, BAR_CELLS, USAGE, safeRelative }

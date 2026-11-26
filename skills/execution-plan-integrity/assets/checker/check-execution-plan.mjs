@@ -15,6 +15,13 @@ import {
 const ROLES = new Set(['evidence', 'validation', 'design', 'archive'])
 const ROLE_MARKER = /execution-role: (canonical|evidence|validation|design|archive)/g
 const DEFAULT_CONFIG = '.execution-plan-integrity.json'
+export const CAPABILITY_KEYS = ['uiAudit', 'nonUiAudit', 'fanoutWorktrees', 'devServer', 'testGates']
+export const CAPABILITY_PROFILES = {
+  'docs-only': { uiAudit: false, nonUiAudit: false, fanoutWorktrees: false, devServer: false, testGates: false },
+  backend: { uiAudit: false, nonUiAudit: true, fanoutWorktrees: true, devServer: false, testGates: true },
+  frontend: { uiAudit: true, nonUiAudit: false, fanoutWorktrees: true, devServer: true, testGates: true },
+  fullstack: { uiAudit: true, nonUiAudit: true, fanoutWorktrees: true, devServer: true, testGates: true },
+}
 export const CANONICAL_PLAN_PATH = 'docs/execution-plan.md'
 export const CANONICAL_WORD_LIMIT = 10000
 const LOCAL_IMPLEMENTATION_GLOBS = [
@@ -44,16 +51,91 @@ function stringList(value, label) {
   return value
 }
 
+// JSONC: comments are ignored outside quoted strings. The same reader is used by
+// the checker and by status.mjs so both see identical core and capability fields.
+export function parseJsonc(text, label) {
+  let out = ''
+  let index = 0
+  let inString = false
+  let escaped = false
+  while (index < text.length) {
+    const char = text[index]
+    const next = text[index + 1]
+    if (inString) {
+      out += char
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      index += 1
+      continue
+    }
+    if (char === '"') {
+      inString = true
+      out += char
+      index += 1
+      continue
+    }
+    if (char === '/' && next === '/') {
+      while (index < text.length && text[index] !== '\n') index += 1
+      continue
+    }
+    if (char === '/' && next === '*') {
+      index += 2
+      while (index < text.length && !(text[index] === '*' && text[index + 1] === '/')) index += 1
+      index += 2
+      continue
+    }
+    out += char
+    index += 1
+  }
+  try {
+    return JSON.parse(out)
+  } catch (error) {
+    throw new Error(`Cannot read ${label}: ${error.message}`)
+  }
+}
+
+export function readConfigObject(root, configPath = DEFAULT_CONFIG) {
+  const relativeConfig = safeRelativePath(configPath, 'Config path')
+  return parseJsonc(readFileSync(join(root, relativeConfig), 'utf8'), relativeConfig)
+}
+
+function readCapabilities(config) {
+  const profile = config.profile ?? 'fullstack'
+  if (typeof profile !== 'string' || (profile !== 'custom' && !(profile in CAPABILITY_PROFILES))) {
+    throw new Error(`Unknown capability profile: ${String(profile)}`)
+  }
+  const raw = config.capabilities
+  if (raw === undefined) {
+    if (profile === 'custom') throw new Error('The custom profile requires an explicit capabilities object.')
+    return { profile, capabilities: null }
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('capabilities must be an object.')
+  }
+  for (const [key, value] of Object.entries(raw)) {
+    if (!CAPABILITY_KEYS.includes(key)) throw new Error(`Unknown capability key: ${key}`)
+    if (typeof value !== 'boolean') throw new Error(`capabilities.${key} must be a boolean.`)
+  }
+  if (profile === 'custom') {
+    for (const key of CAPABILITY_KEYS) {
+      if (typeof raw[key] !== 'boolean') throw new Error(`The custom profile requires capabilities.${key}.`)
+    }
+  }
+  return { profile, capabilities: raw }
+}
+
 export function readExecutionConfig(root, configPath = DEFAULT_CONFIG) {
   const relativeConfig = safeRelativePath(configPath, 'Config path')
   const absolute = join(root, relativeConfig)
   let config
   try {
-    config = JSON.parse(readFileSync(absolute, 'utf8'))
+    config = parseJsonc(readFileSync(absolute, 'utf8'), relativeConfig)
   } catch (error) {
     throw new Error(`Cannot read execution-plan config ${relativeConfig}: ${error.message}`)
   }
   if (config?.schema !== 2) throw new Error('Execution-plan config schema must be 2.')
+  const { profile, capabilities } = readCapabilities(config)
   const canonical = safeRelativePath(config.canonical, 'Canonical path')
   if (canonical !== CANONICAL_PLAN_PATH) {
     throw new Error(
@@ -76,7 +158,7 @@ export function readExecutionConfig(root, configPath = DEFAULT_CONFIG) {
     if (!ROLES.has(role)) throw new Error(`Unknown execution role in config: ${role}`)
     roles[role] = stringList(patterns, `roles.${role}`)
   }
-  return { canonical, requiredGlobs, roles, completionProofDirectory }
+  return { canonical, requiredGlobs, roles, completionProofDirectory, profile, capabilities }
 }
 
 function matches(root, patterns) {

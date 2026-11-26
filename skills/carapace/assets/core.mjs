@@ -1,15 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runChecks } from '../../app-slop-audit/assets/checker/check-records.mjs'
-import { CANONICAL_PLAN_PATH, checkExecutionProject } from '../../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
-import { DEFAULT_CONFIG, DEFAULT_PROOF_DIR, safeRelative } from './config.mjs'
+import { CANONICAL_PLAN_PATH, checkExecutionProject, readConfigObject } from '../../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
+import { DEFAULT_CONFIG, DEFAULT_PROOF_DIR, resolveCapabilities, safeRelative } from './config.mjs'
 import { renderBar } from './render.mjs'
 import { parseRegisterStatus } from './register.mjs'
 import { inspectAuditState } from './audit.mjs'
 import { detectAppProfile } from './app-profile.mjs'
 import { readGitState } from './git.mjs'
 import { detectInterruptedSteps } from './proofs.mjs'
-import { buildStageAndOptions, evaluatePromptConflicts } from './prompt.mjs'
+import { buildStageAndOptions, evaluatePromptConflicts, optionCapability } from './prompt.mjs'
 
 export function readCarapaceStatus({
   root = process.cwd(),
@@ -41,18 +41,15 @@ export function readCarapaceStatus({
       interruptedSteps: [],
       appProfile,
       gitState,
+      capabilities: resolveCapabilities({}, appProfile),
     }
     const { stage, options } = buildStageAndOptions(base)
     const preflight = evaluatePromptConflicts({ ...base, stage, options }, prompt)
     return { ...base, stage, options, preflight }
   }
 
-  let config
-  try {
-    config = JSON.parse(readFileSync(absConfig, 'utf8'))
-  } catch (error) {
-    throw new Error(`Cannot read ${relConfig}: ${error.message}`)
-  }
+  const config = readConfigObject(root, relConfig)
+  const capabilities = resolveCapabilities(config, appProfile)
   const canonical = safeRelative(config?.canonical)
   if (!canonical) throw new Error(`Invalid canonical path in ${relConfig}`)
   const legacyCanonical = canonical !== CANONICAL_PLAN_PATH ? canonical : null
@@ -97,9 +94,23 @@ export function readCarapaceStatus({
     interruptedSteps,
     appProfile,
     gitState,
+    capabilities,
   }
-  const { stage, recommendedNextPrompt, options } = buildStageAndOptions(base)
-  const nextPrompt = recommendedNextPrompt ?? parsed.nextPrompt
+  const { stage, recommendedNextPrompt, options: rawOptions } = buildStageAndOptions(base)
+  const options = rawOptions.map((option) => {
+    const key = optionCapability(option.command)
+    return key && capabilities.values[key]?.enabled === false
+      ? { ...option, disabled: true, reason: `capabilities.${key} is disabled` }
+      : option
+  })
+  let recommended = recommendedNextPrompt
+  if (options.find((option) => option.recommended)?.disabled) {
+    const firstEnabled = options.find((option) => !option.disabled)
+    options.forEach((option) => { option.recommended = false })
+    if (firstEnabled) firstEnabled.recommended = true
+    recommended = firstEnabled?.command ?? '/carapace'
+  }
+  const nextPrompt = recommended ?? parsed.nextPrompt
   const label = legacyCanonical
     ? `${parsed.label} (migrate ${legacyCanonical} -> ${CANONICAL_PLAN_PATH})`
     : parsed.label

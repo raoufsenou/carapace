@@ -334,6 +334,35 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   const isVerifyOnly = /\b(?:verify|status|check)\b/i.test(text) && !/\b(?:run|apply|fix|implement|build|add)\b/i.test(text)
   if (isVerifyOnly) return { hasConflict: false, conflicts: [] }
 
+  const capabilities = status.capabilities?.values
+  if (capabilities) {
+    const needed = []
+    if (/\baudit\b/i.test(text) && /\b(?:ui|screens?|layout|visual|frontend|rendered)\b/i.test(text) && capabilities.uiAudit?.enabled === false) needed.push('uiAudit')
+    if (/\baudit\b/i.test(text) && /\b(?:backend|data|api|cli|code|non-?ui)\b/i.test(text) && capabilities.nonUiAudit?.enabled === false) needed.push('nonUiAudit')
+    if (/\b(?:in parallel|fan.?out|batch|worktree)\b/i.test(text) && capabilities.fanoutWorktrees?.enabled === false) needed.push('fanoutWorktrees')
+    if (/\b(?:dev server|serve|browser|capture|screenshot|rendered app)\b/i.test(text) && capabilities.devServer?.enabled === false) needed.push('devServer')
+    if (needed.length > 0) {
+      conflicts.push({
+        kind: 'capability-disabled',
+        message: `${needed.join(', ')} ${needed.length === 1 ? 'is' : 'are'} disabled in this repository's capability profile. Set capabilities.${needed[0]} to true in .execution-plan-integrity.json, then rerun; do not enable it silently.`,
+        options: [
+          {
+            id: 'verify-capability',
+            label: 'Inspect state and the exact config key first (Recommended)',
+            recommended: true,
+            command: '/carapace verify',
+          },
+          {
+            id: 'proceed-without-capability',
+            label: 'Proceed without that engine (the requested action cannot run)',
+            recommended: false,
+            command: `/carapace ${text}`,
+          },
+        ],
+      })
+    }
+  }
+
   if (status.gitState?.outerGitRoot && !isSetup) {
     conflicts.push({
       kind: 'uninitialized-git-subdirectory',
@@ -592,4 +621,14 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     conflicts,
   }
 }
+export function optionCapability(command) {
+  if (typeof command !== 'string') return null
+  const text = command.toLowerCase()
+  if (/\baudit\b/.test(text) && /\b(?:ui|screens?|layout|visual|frontend|rendered)\b/.test(text)) return 'uiAudit'
+  if (/\baudit\b/.test(text) && /\b(?:backend|data|api|cli|code|non-?ui)\b/.test(text)) return 'nonUiAudit'
+  if (/\b(?:in parallel|fan.?out|batch|worktree)\b/.test(text)) return 'fanoutWorktrees'
+  if (/\b(?:dev server|serve|browser|capture|screenshot|rendered app)\b/.test(text)) return 'devServer'
+  return null
+}
+
 export { buildStageAndOptions }
