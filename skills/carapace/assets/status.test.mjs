@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import {
   commandPlan,
   formatCarapaceStatus,
+  inspectAuditState,
   parseRegisterStatus,
   readCarapaceStatus,
 } from './status.mjs'
@@ -1526,4 +1527,183 @@ test('preflight guards IDLE/NONE, checks bare task-ID runs, and anchors lifecycl
     assert.deepEqual(clean.preflight.conflicts.map((c) => c.kind), [], `"${prompt}" must not conflict`)
     assert.deepEqual(clean.preflight.warnings, [], `"${prompt}" must not warn`)
   }
+})
+
+test('core retains pre-canonical capabilities, syncs promoted Recommended labels, and isolates per-app audit tracking (REQ-RW-9)', () => {
+  // 1. Pre-canonical config retains resolved capabilities (profile: docs-only) before docs/execution-plan.md exists.
+  const preRoot = tempRepo()
+  write(
+    preRoot,
+    '.execution-plan-integrity.json',
+    JSON.stringify({
+      schema: 2,
+      canonical: 'docs/execution-plan.md',
+      profile: 'docs-only',
+    }),
+  )
+  for (const prompt of ['audit', 'audit screens and UI']) {
+    const pre = readCarapaceStatus({ root: preRoot, prompt })
+    assert.equal(pre.initialized, false)
+    assert.equal(pre.capabilities.profile, 'docs-only')
+    assert.equal(pre.capabilities.values.uiAudit.enabled, false)
+    assert.equal(pre.capabilities.values.nonUiAudit.enabled, false)
+    assert.equal(pre.capabilities.values.testGates.enabled, false)
+    assert.equal(pre.preflight.hasConflict, true)
+    assert.equal(pre.preflight.conflicts[0].kind, 'capability-disabled')
+  }
+
+  // 2. Disabled top recommended option removes "(Recommended)" from disabled option and promotes first enabled option.
+  const promoRoot = tempRepo()
+  write(promoRoot, 'frontend/src/screens/HomeScreen.tsx', 'export const Home = () => null\n')
+  write(
+    promoRoot,
+    '.execution-plan-integrity.json',
+    JSON.stringify({
+      schema: 2,
+      canonical: 'docs/execution-plan.md',
+      capabilities: { fanoutWorktrees: false },
+    }),
+  )
+  write(
+    promoRoot,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `WEB-HOME`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `WEB-HOME` | `IMPLEMENTATION` | `NOW` | Fix apps/web/src/Home.tsx spacing. | Audit |',
+      '| 2 | `ADMIN-HOME` | `IMPLEMENTATION` | `QUEUED` | Fix apps/admin/src/Home.tsx spacing. | Audit |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  const parallelFallback = readCarapaceStatus({ root: promoRoot })
+  assert.equal(parallelFallback.nextPrompt, '/carapace run WEB-HOME')
+  assert.equal(parallelFallback.options[0].disabled, true)
+  assert.equal(parallelFallback.options[0].recommended, false)
+  assert.doesNotMatch(parallelFallback.options[0].label, /\(Recommended\)/i)
+  assert.equal(parallelFallback.options[1].recommended, true)
+  assert.match(parallelFallback.options[1].label, / \(Recommended\)$/)
+  for (const option of parallelFallback.options) {
+    assert.equal(option.recommended, / \(Recommended\)$/.test(option.label))
+  }
+
+  // Idle with hasUi: true and uiAudit: false promotes audit-non-ui with synchronized Recommended label.
+  write(
+    promoRoot,
+    '.execution-plan-integrity.json',
+    JSON.stringify({
+      schema: 2,
+      canonical: 'docs/execution-plan.md',
+      capabilities: { uiAudit: false, nonUiAudit: true },
+    }),
+  )
+  write(
+    promoRoot,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `IDLE`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `P1` | `IMPLEMENTATION` | `DONE` | Completed 2026-10-14; docs/execution-proofs/P1.json. | Proof |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  const idleFallback = readCarapaceStatus({ root: promoRoot })
+  assert.equal(idleFallback.nextPrompt, '/carapace audit backend, data, and code')
+  assert.equal(idleFallback.options[0].id, 'audit-ui')
+  assert.equal(idleFallback.options[0].disabled, true)
+  assert.equal(idleFallback.options[0].recommended, false)
+  assert.doesNotMatch(idleFallback.options[0].label, /\(Recommended\)/i)
+  assert.equal(idleFallback.options[1].id, 'audit-non-ui')
+  assert.equal(idleFallback.options[1].recommended, true)
+  assert.match(idleFallback.options[1].label, / \(Recommended\)$/)
+  for (const option of idleFallback.options) {
+    assert.equal(option.recommended, / \(Recommended\)$/.test(option.label))
+  }
+
+  // 3. Multi-app unappliedAccepted isolation, prefix-sharing siblings, regex metacharacters, and cross-audit isolation.
+  const writeAcceptedAudit = (root, audit, target) => {
+    write(
+      root,
+      `docs/audit/${audit}/${target}/v1.json`,
+      JSON.stringify({
+        date: '2026-10-15',
+        commit: '1111111',
+        raised: [{ id: 'A1', title: 'Issue' }],
+      }),
+    )
+    write(
+      root,
+      `docs/audit/${audit}/${target}/v1-verdicts.json`,
+      JSON.stringify({
+        date: '2026-10-15',
+        decisions: [{ finding: 'A1', verdict: 'accepted' }],
+      }),
+    )
+  }
+
+  const siblingRoot = tempRepo()
+  writeAcceptedAudit(siblingRoot, 'ui', 'web')
+  writeAcceptedAudit(siblingRoot, 'ui', 'admin')
+  const siblingState = inspectAuditState(siblingRoot, [
+    { id: 'UI-WEB-1', state: 'NOW', work: 'Apply accepted findings for docs/audit/ui/web.', source: 'docs/audit/ui/web/v1-verdicts.json' },
+  ])
+  assert.equal(siblingState.unappliedAccepted.find((e) => e.target === 'web')?.trackedInRegister, true)
+  assert.equal(siblingState.unappliedAccepted.find((e) => e.target === 'admin')?.trackedInRegister, false)
+
+  const prefixRoot = tempRepo()
+  writeAcceptedAudit(prefixRoot, 'ui', 'web')
+  writeAcceptedAudit(prefixRoot, 'ui', 'web-admin')
+  const prefixState = inspectAuditState(prefixRoot, [
+    { id: 'UI-WEB-ADMIN-1', state: 'NOW', work: 'Apply accepted findings for web-admin in docs/audit/ui/web-admin.', source: 'Audit' },
+  ])
+  assert.equal(prefixState.unappliedAccepted.find((e) => e.target === 'web-admin')?.trackedInRegister, true)
+  assert.equal(prefixState.unappliedAccepted.find((e) => e.target === 'web')?.trackedInRegister, false)
+
+  const metaRoot = tempRepo()
+  writeAcceptedAudit(metaRoot, 'ui', 'web.v2')
+  writeAcceptedAudit(metaRoot, 'non-ui', 'api+v1')
+  writeAcceptedAudit(metaRoot, 'ui', 'app(1)')
+  const nonLiteralState = inspectAuditState(metaRoot, [
+    { id: 'FIX-1', state: 'NOW', work: 'Fix webXv2, apiiiv1, and app1.', source: 'Plan' },
+  ])
+  assert.equal(nonLiteralState.unappliedAccepted.find((e) => e.target === 'web.v2')?.trackedInRegister, false)
+  assert.equal(nonLiteralState.unappliedAccepted.find((e) => e.target === 'api+v1')?.trackedInRegister, false)
+  assert.equal(nonLiteralState.unappliedAccepted.find((e) => e.target === 'app(1)')?.trackedInRegister, false)
+
+  const literalState = inspectAuditState(metaRoot, [
+    { id: 'FIX-WEB', state: 'NOW', work: 'Apply web.v2 fixes.', source: 'docs/audit/ui/web.v2' },
+    { id: 'FIX-API', state: 'QUEUED', work: 'Apply api+v1 fixes.', source: 'docs/audit/non-ui/api+v1' },
+    { id: 'FIX-APP', state: 'QUEUED', work: 'Apply app(1) fixes.', source: 'docs/audit/ui/app(1)' },
+  ])
+  assert.equal(literalState.unappliedAccepted.find((e) => e.target === 'web.v2')?.trackedInRegister, true)
+  assert.equal(literalState.unappliedAccepted.find((e) => e.target === 'api+v1')?.trackedInRegister, true)
+  assert.equal(literalState.unappliedAccepted.find((e) => e.target === 'app(1)')?.trackedInRegister, true)
+
+  const crossAuditRoot = tempRepo()
+  writeAcceptedAudit(crossAuditRoot, 'ui', 'web')
+  writeAcceptedAudit(crossAuditRoot, 'non-ui', 'web')
+  const nonUiRowOnly = inspectAuditState(crossAuditRoot, [
+    { id: 'NON-UI-WEB-1', state: 'NOW', work: 'Apply accepted findings for docs/audit/non-ui/web.', source: 'docs/audit/non-ui/web/v1-verdicts.json' },
+  ])
+  assert.equal(nonUiRowOnly.unappliedAccepted.find((e) => e.audit === 'non-ui' && e.target === 'web')?.trackedInRegister, true)
+  assert.equal(nonUiRowOnly.unappliedAccepted.find((e) => e.audit === 'ui' && e.target === 'web')?.trackedInRegister, false)
+
+  const uiRowOnly = inspectAuditState(crossAuditRoot, [
+    { id: 'UI-WEB-1', state: 'NOW', work: 'Apply accepted findings for docs/audit/ui/web.', source: 'docs/audit/ui/web/v1-verdicts.json' },
+  ])
+  assert.equal(uiRowOnly.unappliedAccepted.find((e) => e.audit === 'ui' && e.target === 'web')?.trackedInRegister, true)
+  assert.equal(uiRowOnly.unappliedAccepted.find((e) => e.audit === 'non-ui' && e.target === 'web')?.trackedInRegister, false)
+
+  const uiIdOnly = inspectAuditState(crossAuditRoot, [
+    { id: 'UI-WEB-1', state: 'NOW', work: 'Fix web header spacing.', source: 'UI audit' },
+  ])
+  assert.equal(uiIdOnly.unappliedAccepted.find((e) => e.audit === 'ui' && e.target === 'web')?.trackedInRegister, true)
+  assert.equal(uiIdOnly.unappliedAccepted.find((e) => e.audit === 'non-ui' && e.target === 'web')?.trackedInRegister, false)
 })

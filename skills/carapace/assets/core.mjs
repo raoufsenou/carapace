@@ -76,7 +76,7 @@ export function readCarapaceStatus({
       interruptedSteps: [],
       appProfile,
       gitState,
-      capabilities: resolveCapabilities({}, appProfile),
+      capabilities,
       requirements: emptyRequirements(),
     }
     const { stage, options } = buildStageAndOptions(base)
@@ -115,13 +115,17 @@ export function readCarapaceStatus({
     const key = optionCapability(option.command)
     return key && capabilities.values[key]?.enabled === false
       ? { ...option, disabled: true, reason: `capabilities.${key} is disabled` }
-      : option
+      : { ...option }
   })
   let recommended = recommendedNextPrompt
   if (options.find((option) => option.recommended)?.disabled) {
     const firstEnabled = options.find((option) => !option.disabled)
-    options.forEach((option) => { option.recommended = false })
-    if (firstEnabled) firstEnabled.recommended = true
+    for (const option of options) {
+      const isNext = option === firstEnabled
+      option.recommended = isNext
+      const baseLabel = option.label.replace(/\s+\(Recommended\)\s*$/i, '')
+      option.label = isNext ? `${baseLabel} (Recommended)` : baseLabel
+    }
     recommended = firstEnabled?.command ?? '/carapace'
   }
   const nextPrompt = recommended ?? parsed.nextPrompt

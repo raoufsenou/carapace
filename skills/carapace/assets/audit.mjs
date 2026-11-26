@@ -1,8 +1,52 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { readFolder, runChecks } from '../../app-slop-audit/assets/checker/check-records.mjs'
+import { readFolder } from '../../app-slop-audit/assets/checker/check-records.mjs'
 import { checkRecords } from '../../app-slop-audit/assets/checker/records.mjs'
 import { listSubdirs } from './fs-utils.mjs'
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function isTargetTrackedInRegister(activeRows, audit, target, targets) {
+  const escapedTarget = escapeRegExp(target)
+  const tokenPattern = new RegExp(
+    `(?<![A-Za-z0-9._+-])${escapedTarget}(?![A-Za-z0-9_+-]|\\.[A-Za-z0-9])`,
+    'i',
+  )
+  const hyphenIdPattern = new RegExp(`(?:^|-)${escapedTarget}(?:-|$)`, 'i')
+  const targetLower = target.toLowerCase()
+  const longerSiblingPatterns = targets
+    .filter((other) => other !== target && other.length > target.length && other.toLowerCase().includes(targetLower))
+    .sort((a, b) => b.length - a.length)
+    .map((other) => new RegExp(escapeRegExp(other), 'gi'))
+
+  for (const row of activeRows) {
+    const rowText = `${row.id ?? ''} ${row.work ?? ''} ${row.source ?? ''}`
+    if (audit === 'ui') {
+      if (/(?:docs\/audit\/non-ui\b|\bnon-ui\b)/i.test(rowText) && !/(?:docs\/audit\/ui\b|(?<!non-)\bui\b)/i.test(rowText)) {
+        continue
+      }
+    } else if (audit === 'non-ui') {
+      if (
+        /(?:docs\/audit\/ui\b|(?<!non-)\bui\s+audit\b|(?:^|-)ui-)/i.test(rowText) &&
+        !/(?:docs\/audit\/non-ui\b|\bnon-ui\b)/i.test(rowText)
+      ) {
+        continue
+      }
+    }
+
+    let maskedRowText = rowText
+    let maskedId = row.id ?? ''
+    for (const siblingPattern of longerSiblingPatterns) {
+      maskedRowText = maskedRowText.replace(siblingPattern, ' ')
+      maskedId = maskedId.replace(siblingPattern, ' ')
+    }
+    if (tokenPattern.test(maskedRowText)) return true
+    if (hyphenIdPattern.test(maskedId)) return true
+  }
+  return false
+}
 
 function readTargetAuditSummary(targetDir, { audit = 'ui', shared = false } = {}) {
   const entries = existsSync(targetDir) ? readdirSync(targetDir) : []
@@ -204,10 +248,7 @@ export function inspectAuditState(root, registerRows = [], headCommit = null) {
   }
   if (!state.hasAuditDir) return state
 
-  const activeWorkText = registerRows
-    .filter((row) => row.state === 'NOW' || row.state === 'QUEUED')
-    .map((row) => `${row.id} ${row.work} ${row.source}`)
-    .join('\n')
+  const activeRows = registerRows.filter((row) => row.state === 'NOW' || row.state === 'QUEUED')
 
   for (const audit of ['ui', 'non-ui']) {
     const kindDir = join(root, 'docs', 'audit', audit)
@@ -265,9 +306,7 @@ export function inspectAuditState(root, registerRows = [], headCommit = null) {
         })
       }
       if (summary.acceptedPendingCount > 0) {
-        const trackedInRegister =
-          new RegExp(`\\b${target}\\b`, 'i').test(activeWorkText) ||
-          /\b(?:audit|slop|finding|UI-|NON-UI-|APP-AUDIT)/i.test(activeWorkText)
+        const trackedInRegister = isTargetTrackedInRegister(activeRows, audit, target, targets)
         state.unappliedAccepted.push({
           audit,
           target,
