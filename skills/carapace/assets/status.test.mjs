@@ -12,6 +12,7 @@ import {
   readCarapaceStatus,
 } from './status.mjs'
 import { analyzeFanoutReadiness } from './fanout.mjs'
+import { readRequirementsBrief, targetTaskId, targetTaskIds } from './requirements.mjs'
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'status.mjs')
 const roots = []
@@ -757,4 +758,380 @@ test('fanout analysis preserves non-IMPLEMENTATION register gates and rejects un
     'SHARED-FRAME',
   )
   assert.equal(sharedThenUnscoped.mode, 'sequential')
+})
+
+test('requirements target resolution handles natural prompts, dotted IDs, and token boundaries (REQ-RW-5)', () => {
+  const status = {
+    now: 'P1.2',
+    rows: [
+      { id: 'P1', kind: 'IMPLEMENTATION', state: 'DONE', work: 'Base work.' },
+      { id: 'P1.2', kind: 'IMPLEMENTATION', state: 'NOW', work: 'Dotted step.' },
+      { id: 'AUTH-1', kind: 'IMPLEMENTATION', state: 'QUEUED', work: 'Auth step.' },
+    ],
+    unorderedRows: [{ id: 'DEC-2', kind: 'DECISION', state: 'DEFERRED', work: 'Pending decision.' }],
+  }
+
+  for (const prompt of ['run the tests', 'run tests', 'run all', 'run all tasks in parallel', 'run UI tests', 'run Tests', 'run API', 'run and P2.3']) {
+    assert.deepEqual(targetTaskIds(status, prompt), ['P1.2'], `natural prompt "${prompt}" must fall back to NOW`)
+    assert.equal(targetTaskId(status, prompt), 'P1.2')
+  }
+
+  assert.deepEqual(targetTaskIds(status, 'run tests for P1.2'), ['P1.2'])
+  assert.deepEqual(targetTaskIds(status, 'run p1.2'), ['P1.2'])
+  assert.deepEqual(targetTaskIds(status, 'run P1.2 and P1'), ['P1.2', 'P1'])
+  assert.deepEqual(targetTaskIds(status, 'run P2.3'), ['P2.3'])
+  assert.deepEqual(targetTaskIds(status, 'run `P2.3`.'), ['P2.3'])
+  assert.deepEqual(targetTaskIds(status, 'run W1, `A1`, and P2.3.'), ['W1', 'A1', 'P2.3'])
+  assert.deepEqual(targetTaskIds(status, 'promote dec-2'), ['DEC-2'])
+  assert.deepEqual(targetTaskIds(status, 'run AUTH-10'), ['AUTH-10'])
+  assert.deepEqual(targetTaskIds(status, 'run P1.2.1'), ['P1.2.1'])
+  assert.deepEqual(targetTaskIds(status, 'run P1.20'), ['P1.20'])
+  assert.deepEqual(targetTaskIds(status, 'check AUTH-10'), ['P1.2'])
+  assert.deepEqual(targetTaskIds({ now: 'IDLE', rows: [] }, 'run'), [])
+  assert.equal(targetTaskId({ now: 'NONE', rows: [] }, 'run the tests'), null)
+
+  const root = tempRepo()
+  write(
+    root,
+    'docs/auth10.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for AUTH-10, AUTH-1-SUB, SUB-AUTH-1, AUTH-1.2, P1.2.1, P1.20.',
+      '### REQ-A10 — tenth auth rule',
+    ].join('\n'),
+  )
+  write(
+    root,
+    'docs/p12.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for P1.2. Do not apply to AUTH-1.',
+      '### REQ-P12 — dotted rule',
+    ].join('\n'),
+  )
+
+  const auth1 = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'AUTH-1' })
+  assert.equal(auth1.status, 'MISSING')
+
+  const auth10 = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'AUTH-10' })
+  assert.equal(auth10.status, 'LOCKED')
+  assert.equal(auth10.source.path, 'docs/auth10.md')
+
+  const p12 = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'P1.2' })
+  assert.equal(p12.status, 'LOCKED')
+  assert.equal(p12.source.path, 'docs/p12.md')
+  assert.deepEqual(p12.ids, [
+    { id: 'REQ-P12', statement: 'dotted rule', source: { path: 'docs/p12.md', anchor: 'REQ-P12' } },
+  ])
+
+  const p1 = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'P1' })
+  assert.equal(p1.status, 'MISSING')
+})
+
+test('requirements extraction parses heading and bullet REQs while skipping fences, non-goals, and prose (REQ-RW-5)', () => {
+  const root = tempRepo()
+  write(
+    root,
+    'docs/formats.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for `FMT-1`.',
+      '',
+      'REQ-PROSE-1 — plain prose paragraph must not be parsed.',
+      'See REQ-PROSE-2: mid-sentence mention must not be parsed.',
+      '- See REQ-PROSE-3: mid-sentence bullet mention must not be parsed.',
+      '- REQ-EMPTY:',
+      '- **REQ-EMPTY-BOLD:**',
+      '',
+      '### REQ-H1 — heading em-dash',
+      '## `REQ-H2`: backticked heading colon',
+      '#### **REQ-H3** - bold heading hyphen',
+      '- **REQ-B1**: bold bullet colon',
+      '- **REQ-B2:** colon inside bold',
+      '- **REQ-B3 — whole bullet bold**',
+      '- REQ-B4 — plain bullet em-dash',
+      '  - `REQ-B5` - indented backticked hyphen',
+      '  * REQ-B4 — duplicate ID ignored',
+      '',
+      '```markdown',
+      '### REQ-FENCE-1 — inside backtick fence',
+      '- REQ-FENCE-2: inside backtick fence',
+      '```',
+      '',
+      '~~~text',
+      '- REQ-TILDE-1 — inside tilde fence',
+      '~~~',
+      '',
+      '## Non-goals',
+      '- REQ-NG-1 — inside H2 non-goals',
+      '- No magic defaults.',
+      '',
+      '### Non-goals details',
+      '- REQ-NG-2: inside H3 under H2 non-goals',
+      '',
+      '## Additional frozen',
+      '### Non-goals',
+      '- REQ-NG-3: inside H3 non-goals',
+      '### REQ-H4 – en-dash after H3 non-goals',
+    ].join('\n'),
+  )
+
+  const brief = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'FMT-1' })
+  assert.equal(brief.status, 'LOCKED')
+  assert.deepEqual(brief.ids, [
+    { id: 'REQ-H1', statement: 'heading em-dash', source: { path: 'docs/formats.md', anchor: 'REQ-H1' } },
+    { id: 'REQ-H2', statement: 'backticked heading colon', source: { path: 'docs/formats.md', anchor: 'REQ-H2' } },
+    { id: 'REQ-H3', statement: 'bold heading hyphen', source: { path: 'docs/formats.md', anchor: 'REQ-H3' } },
+    { id: 'REQ-B1', statement: 'bold bullet colon', source: { path: 'docs/formats.md', anchor: 'REQ-B1' } },
+    { id: 'REQ-B2', statement: 'colon inside bold', source: { path: 'docs/formats.md', anchor: 'REQ-B2' } },
+    { id: 'REQ-B3', statement: 'whole bullet bold', source: { path: 'docs/formats.md', anchor: 'REQ-B3' } },
+    { id: 'REQ-B4', statement: 'plain bullet em-dash', source: { path: 'docs/formats.md', anchor: 'REQ-B4' } },
+    { id: 'REQ-B5', statement: 'indented backticked hyphen', source: { path: 'docs/formats.md', anchor: 'REQ-B5' } },
+    { id: 'REQ-H4', statement: 'en-dash after H3 non-goals', source: { path: 'docs/formats.md', anchor: 'REQ-H4' } },
+  ])
+  assert.equal(brief.source.path, 'docs/formats.md')
+  assert.equal(brief.source.anchor, 'REQ-H1')
+  assert.ok(brief.nonGoals.includes('No magic defaults.'))
+})
+
+test('requirements extraction discovers standards.designAuthority safely and deduplicates with roles.design (REQ-RW-5)', () => {
+  const root = tempRepo()
+  write(
+    root,
+    'docs/DESIGN.md',
+    [
+      '# App Design Authority',
+      'Locked 2026-11-26.',
+      'This is the authority for `UI-1`.',
+      '- **REQ-UI-1**: Preserve header height.',
+    ].join('\n'),
+  )
+  write(
+    root,
+    'docs/design-authority.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-25.',
+      'This is the authority for `API-1`.',
+      '### REQ-API-1 — Return structured errors',
+    ].join('\n'),
+  )
+  write(
+    root,
+    'docs/archived-authority.md',
+    [
+      '<!-- execution-role: archive -->',
+      'Locked 2026-11-20.',
+      'This is the authority for `ARCH-1`.',
+      '### REQ-ARCH-1 — Must be rejected',
+    ].join('\n'),
+  )
+  write(
+    root,
+    'docs/audit/ui/web/config.json',
+    JSON.stringify({ standards: { designAuthority: '`docs/DESIGN.md`, The App' } }),
+  )
+  write(
+    root,
+    'docs/audit/non-ui/api/config.json',
+    JSON.stringify({ standards: { designAuthority: 'docs/design-authority.md' } }),
+  )
+  write(
+    root,
+    'docs/audit/ui/bad-traversal/config.json',
+    JSON.stringify({ standards: { designAuthority: '../outside-escape.md' } }),
+  )
+  write(
+    root,
+    'docs/audit/ui/archived/config.json',
+    JSON.stringify({ standards: { designAuthority: 'docs/archived-authority.md' } }),
+  )
+  write(root, 'docs/audit/ui/broken/config.json', '{ invalid json')
+
+  // Unmarked file discovered via annotated backticked standards.designAuthority
+  const uiBrief = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'UI-1' })
+  assert.equal(uiBrief.status, 'LOCKED')
+  assert.equal(uiBrief.source.path, 'docs/DESIGN.md')
+  assert.deepEqual(uiBrief.ids[0].source, { path: 'docs/DESIGN.md', anchor: 'REQ-UI-1' })
+
+  // File matched by BOTH roles.design and plain standards.designAuthority is scanned once, not AMBIGUOUS
+  const apiBrief = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'API-1' })
+  assert.equal(apiBrief.status, 'LOCKED')
+  assert.equal(apiBrief.source.path, 'docs/design-authority.md')
+
+  // Explicit archive role is rejected even when named in standards.designAuthority
+  const archivedBrief = readRequirementsBrief({ root, roles: { design: ['docs/*.md'] }, taskId: 'ARCH-1' })
+  assert.equal(archivedBrief.status, 'MISSING')
+
+  // Traversal outside root via designAuthorities parameter is rejected
+  const traversalBrief = readRequirementsBrief({
+    root,
+    roles: {},
+    taskId: 'ESC-1',
+    designAuthorities: ['../outside-escape.md', '/etc/passwd'],
+  })
+  assert.equal(traversalBrief.status, 'MISSING')
+})
+
+test('requirements extraction aggregates multi-task prompts and Batch rows with per-REQ sources (REQ-RW-5)', () => {
+  const root = tempRepo()
+  write(
+    root,
+    '.execution-plan-integrity.json',
+    JSON.stringify({
+      schema: 2,
+      canonical: 'docs/execution-plan.md',
+      completionProofs: { directory: 'docs/execution-proofs' },
+      requiredGlobs: ['docs/**/*.md'],
+      roles: { design: ['docs/*.md'] },
+    }),
+  )
+  write(
+    root,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `WEB-HOME`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `WEB-HOME` | `IMPLEMENTATION` | `NOW` | Fix apps/web/src/Home.tsx spacing. | Audit |',
+      '| 2 | `ADMIN-HOME` | `IMPLEMENTATION` | `QUEUED` | Fix apps/admin/src/Home.tsx spacing. | Audit |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  write(
+    root,
+    'docs/web-authority.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-20.',
+      'This is the authority for `WEB-HOME`, `W1`, `P1.2`.',
+      '### REQ-W1 — Web spacing holds',
+      '## Non-goals',
+      '- No theme overhaul.',
+    ].join('\n'),
+  )
+  write(
+    root,
+    'docs/admin-authority.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for `ADMIN-HOME`, `A1`.',
+      '- **REQ-A1**: Admin spacing holds',
+      '## Non-goals',
+      '- No theme overhaul.',
+      '- No role changes.',
+    ].join('\n'),
+  )
+
+  // Multi-task prompt brief with both tasks LOCKED in separate authority docs
+  const multiLocked = readCarapaceStatus({ root, prompt: 'run WEB-HOME ADMIN-HOME in parallel' })
+  assert.equal(multiLocked.requirements.status, 'LOCKED')
+  assert.equal(multiLocked.requirements.taskId, 'WEB-HOME, ADMIN-HOME')
+  assert.deepEqual(multiLocked.requirements.taskIds, ['WEB-HOME', 'ADMIN-HOME'])
+  assert.equal(multiLocked.requirements.lockedAt, '2026-11-26')
+  assert.equal(multiLocked.requirements.note, null)
+  assert.deepEqual(multiLocked.requirements.sources, [
+    { path: 'docs/web-authority.md', anchor: 'REQ-W1' },
+    { path: 'docs/admin-authority.md', anchor: 'REQ-A1' },
+  ])
+  assert.deepEqual(multiLocked.requirements.ids, [
+    { id: 'REQ-W1', statement: 'Web spacing holds', source: { path: 'docs/web-authority.md', anchor: 'REQ-W1' } },
+    { id: 'REQ-A1', statement: 'Admin spacing holds', source: { path: 'docs/admin-authority.md', anchor: 'REQ-A1' } },
+  ])
+  assert.deepEqual(multiLocked.requirements.nonGoals, ['No theme overhaul.', 'No role changes.'])
+  assert.equal(multiLocked.requirements.tasks.length, 2)
+
+  // Natural prompt falls back to NOW (WEB-HOME) and stays LOCKED under --no-yolo
+  const naturalRun = readCarapaceStatus({ root, prompt: 'run the tests', yolo: false })
+  assert.equal(naturalRun.requirements.taskId, 'WEB-HOME')
+  assert.equal(naturalRun.requirements.status, 'LOCKED')
+  assert.equal(naturalRun.preflight.conflicts.some((c) => c.kind === 'requirements-not-locked'), false)
+
+  // Multi-task brief with one AMBIGUOUS task propagates AMBIGUOUS and deduplicated candidates
+  write(
+    root,
+    'docs/admin-duplicate.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for `ADMIN-HOME`.',
+      '- REQ-A2: Duplicate admin authority',
+    ].join('\n'),
+  )
+  const multiAmbiguous = readCarapaceStatus({ root, prompt: 'run WEB-HOME ADMIN-HOME', yolo: false })
+  assert.equal(multiAmbiguous.requirements.status, 'AMBIGUOUS')
+  assert.deepEqual(multiAmbiguous.requirements.candidates, ['docs/admin-authority.md', 'docs/admin-duplicate.md'])
+  assert.ok(multiAmbiguous.preflight.conflicts.some((c) => c.kind === 'requirements-not-locked'))
+  rmSync(join(root, 'docs/admin-duplicate.md'), { force: true })
+
+  // Batch: row brief when NOW = BATCH-1 applies W1 and A1 (all LOCKED)
+  write(
+    root,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `BATCH-1`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `BATCH-1` | `VALIDATION` | `NOW` | Batch: from `abc1234`; web applies `W1`, `P1.2` on branch `b1`, owning `apps/web/`; admin applies `A1` on branch `b2`, owning `apps/admin/`. | Direction |',
+      '| 2 | `W1` | `IMPLEMENTATION` | `QUEUED` | Fix apps/web/src/Header.tsx. | Audit |',
+      '| 3 | `P1.2` | `IMPLEMENTATION` | `QUEUED` | Fix apps/web/src/Footer.tsx. | Audit |',
+      '| 4 | `A1` | `IMPLEMENTATION` | `QUEUED` | Fix apps/admin/src/Header.tsx. | Audit |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  const batchLocked = readCarapaceStatus({ root, prompt: 'run BATCH-1', yolo: false })
+  assert.equal(batchLocked.requirements.status, 'LOCKED')
+  assert.equal(batchLocked.requirements.taskId, 'BATCH-1')
+  assert.equal(batchLocked.requirements.batchId, 'BATCH-1')
+  assert.deepEqual(batchLocked.requirements.taskIds, ['W1', 'P1.2', 'A1'])
+  assert.equal(batchLocked.requirements.lockedAt, '2026-11-26')
+  assert.deepEqual(batchLocked.requirements.ids, [
+    { id: 'REQ-W1', statement: 'Web spacing holds', source: { path: 'docs/web-authority.md', anchor: 'REQ-W1' } },
+    { id: 'REQ-A1', statement: 'Admin spacing holds', source: { path: 'docs/admin-authority.md', anchor: 'REQ-A1' } },
+  ])
+  assert.deepEqual(batchLocked.preflight.conflicts.map((c) => c.kind), [])
+
+  // Partial MISSING in a Batch: row reports aggregate MISSING and blocks under --no-yolo
+  rmSync(join(root, 'docs/admin-authority.md'), { force: true })
+  const batchPartial = readCarapaceStatus({ root, prompt: 'run BATCH-1', yolo: false })
+  assert.equal(batchPartial.requirements.status, 'MISSING')
+  assert.equal(batchPartial.requirements.taskId, 'BATCH-1')
+  assert.equal(batchPartial.requirements.lockedAt, null)
+  assert.match(batchPartial.requirements.note, /A1:/)
+  assert.equal(batchPartial.preflight.hasConflict, true)
+  assert.ok(batchPartial.preflight.conflicts.some((c) => c.kind === 'requirements-not-locked'))
+
+  // Partial MISSING in a multi-task prompt also blocks under --no-yolo
+  const multiPartial = readCarapaceStatus({ root, prompt: 'run W1 A1', yolo: false })
+  assert.equal(multiPartial.requirements.status, 'MISSING')
+  assert.equal(multiPartial.requirements.taskId, 'W1, A1')
+  assert.ok(multiPartial.preflight.conflicts.some((c) => c.kind === 'requirements-not-locked'))
+
+  // Batch fallback: when all members are MISSING, a direct authority for BATCH-1 resolves
+  rmSync(join(root, 'docs/web-authority.md'), { force: true })
+  write(
+    root,
+    'docs/batch-direct.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for `BATCH-1`.',
+      '### REQ-B-DIRECT — Batch level authority',
+    ].join('\n'),
+  )
+  const batchDirect = readCarapaceStatus({ root, prompt: 'run BATCH-1', yolo: false })
+  assert.equal(batchDirect.requirements.status, 'LOCKED')
+  assert.equal(batchDirect.requirements.taskId, 'BATCH-1')
+  assert.equal(batchDirect.requirements.source.path, 'docs/batch-direct.md')
+  assert.deepEqual(batchDirect.preflight.conflicts.map((c) => c.kind), [])
 })

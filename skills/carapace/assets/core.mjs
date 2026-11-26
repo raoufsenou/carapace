@@ -10,7 +10,7 @@ import { detectAppProfile } from './app-profile.mjs'
 import { readGitState } from './git.mjs'
 import { detectInterruptedSteps } from './proofs.mjs'
 import { buildStageAndOptions, evaluatePromptConflicts, optionCapability } from './prompt.mjs'
-import { emptyRequirements, readRequirementsBrief, targetTaskId } from './requirements.mjs'
+import { emptyRequirements, readRequirementsBrief, targetTaskIds } from './requirements.mjs'
 
 export function readCarapaceStatus({
   root = process.cwd(),
@@ -103,7 +103,11 @@ export function readCarapaceStatus({
     requirements: readRequirementsBrief({
       root,
       roles: config?.roles ?? {},
-      taskId: targetTaskId({ now: parsed.now, rows: parsed.rows }, prompt),
+      taskIds: targetTaskIds(
+        { now: parsed.now, rows: parsed.rows, unorderedRows: parsed.unorderedRows },
+        prompt,
+      ),
+      rows: parsed.rows,
     }),
   }
   const { stage, recommendedNextPrompt, options: rawOptions } = buildStageAndOptions(base)
