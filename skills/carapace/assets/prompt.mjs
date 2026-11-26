@@ -175,6 +175,35 @@ function buildStageAndOptions(status) {
         ],
       }
     }
+    if (fanoutAnalysis?.mode === 'after-now') {
+      const prerequisite = fanoutAnalysis.prerequisiteId ?? now
+      const ids = fanoutAnalysis.parallelIds.join(', ')
+      const commands = fanoutAnalysis.parallelIds.join(' ')
+      return {
+        stage: 'run',
+        recommendedNextPrompt: `/carapace run ${prerequisite}`,
+        options: [
+          {
+            id: 'run-now',
+            label: `Run ${prerequisite} first; ${ids} become fan-out ready after it closes (Recommended)`,
+            recommended: true,
+            command: `/carapace run ${prerequisite}`,
+          },
+          {
+            id: 'fanout-after-now',
+            label: `After ${prerequisite} closes, fan out ${ids} in parallel worktrees`,
+            recommended: false,
+            command: `/carapace run ${commands} in parallel`,
+          },
+          {
+            id: 'audit',
+            label: appProfile?.hasUi ? 'Audit screens & UI' : 'Audit backend, data & code',
+            recommended: false,
+            command: '/carapace audit',
+          },
+        ],
+      }
+    }
     if (fanoutAnalysis?.mode === 'hybrid') {
       return {
         stage: 'run',
@@ -586,6 +615,28 @@ export function evaluatePromptConflicts(status, rawPrompt) {
           label: 'Run all steps sequentially on the current branch',
           recommended: false,
           command: `/carapace run ${status.now}`,
+        },
+      ],
+    })
+  }
+
+  if (asksParallel && status.fanoutAnalysis?.mode === 'after-now') {
+    const prerequisite = status.fanoutAnalysis.prerequisiteId ?? status.now
+    conflicts.push({
+      kind: 'sequential-prerequisite-before-fanout',
+      message: `${prerequisite} is still NOW and is not part of the parallel slice. Close it first; only then are ${status.fanoutAnalysis.parallelIds.join(', ')} fan-out ready.`,
+      options: [
+        {
+          id: 'run-prerequisite',
+          label: `Run ${prerequisite} on main first, then fan out ${status.fanoutAnalysis.parallelIds.join(', ')} (Recommended)`,
+          recommended: true,
+          command: `/carapace run ${prerequisite}`,
+        },
+        {
+          id: 'verify-prerequisite',
+          label: 'Inspect the register and worktree state before deciding',
+          recommended: false,
+          command: '/carapace verify',
         },
       ],
     })

@@ -106,6 +106,7 @@ function analyzeFanoutReadiness(rows, now) {
     }
   }
 
+  const nowIsImplementation = nowRow.kind === 'IMPLEMENTATION' || !nowRow.kind
   const implRows = activeRows.filter((row) => row.kind === 'IMPLEMENTATION' || !row.kind)
   if (implRows.length < 2) {
     return { mode: 'sequential', parallelIds: [], sharedReason: null }
@@ -118,23 +119,38 @@ function analyzeFanoutReadiness(rows, now) {
   if (firstIsShared) {
     const restDisjoint = selectDisjointSlice(implRows.slice(1))
     if (restDisjoint.length >= 2) {
-      return {
-        mode: 'hybrid',
-        sharedPrerequisiteId: first.id,
-        sharedReason: first.work,
-        parallelIds: restDisjoint.map((row) => row.id),
-      }
+      return nowIsImplementation
+        ? {
+            mode: 'hybrid',
+            sharedPrerequisiteId: first.id,
+            sharedReason: first.work,
+            parallelIds: restDisjoint.map((row) => row.id),
+          }
+        : {
+            mode: 'after-now',
+            prerequisiteId: nowRow.id,
+            sharedPrerequisiteId: first.id,
+            sharedReason: first.work,
+            parallelIds: restDisjoint.map((row) => row.id),
+          }
     }
     return { mode: 'sequential', parallelIds: [], sharedReason: null }
   }
 
   const parallelSlice = selectDisjointSlice(implRows)
   if (parallelSlice.length >= 2) {
-    return {
-      mode: 'parallel-ready',
-      parallelIds: parallelSlice.map((row) => row.id),
-      sharedReason: null,
-    }
+    return nowIsImplementation
+      ? {
+          mode: 'parallel-ready',
+          parallelIds: parallelSlice.map((row) => row.id),
+          sharedReason: null,
+        }
+      : {
+          mode: 'after-now',
+          prerequisiteId: nowRow.id,
+          parallelIds: parallelSlice.map((row) => row.id),
+          sharedReason: null,
+        }
   }
   return { mode: 'sequential', parallelIds: [], sharedReason: null }
 }

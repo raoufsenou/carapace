@@ -278,6 +278,32 @@ test('inspects interrupted steps, canonical app-slop-audit records, zero-finding
   assert.deepEqual(parallelReady.fanoutAnalysis.parallelIds, ['WEB-HOME', 'ADMIN-HOME'])
   assert.equal(parallelReady.nextPrompt, '/carapace run WEB-HOME ADMIN-HOME in parallel')
 
+  // An open VALIDATION gate is not part of the parallel slice: it must close first.
+  write(
+    root,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `GATE-STEP`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `GATE-STEP` | `VALIDATION` | `NOW` | Run the control-vs-variant gate. | Plan |',
+      '| 2 | `A-STEP` | `IMPLEMENTATION` | `QUEUED` | Fix quid/web/wallet/src/routes/Home.tsx spacing. | Audit |',
+      '| 3 | `B-STEP` | `IMPLEMENTATION` | `QUEUED` | Fix dz-wallet/web/admin/src/routes/Home.tsx spacing. | Audit |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  const afterGate = readCarapaceStatus({ root })
+  assert.equal(afterGate.fanoutAnalysis.mode, 'after-now')
+  assert.equal(afterGate.fanoutAnalysis.prerequisiteId, 'GATE-STEP')
+  assert.deepEqual(afterGate.fanoutAnalysis.parallelIds, ['A-STEP', 'B-STEP'])
+  assert.equal(afterGate.nextPrompt, '/carapace run GATE-STEP')
+  assert.equal(afterGate.options[0].command, '/carapace run GATE-STEP')
+  const premature = readCarapaceStatus({ root, prompt: 'run A-STEP B-STEP in parallel' })
+  assert.equal(premature.preflight.conflicts[0].kind, 'sequential-prerequisite-before-fanout')
+
   // Single-app steps touching shared contract.ts / api.ts are sequential, not falsely parallel-ready
   write(
     root,

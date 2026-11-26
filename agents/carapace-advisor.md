@@ -60,6 +60,7 @@ Never blindly agree that implementation/fix work can or cannot be done in fan-ou
     - *If the user asked to fan out everything immediately, explicitly warn them which leading step(s) touch shared files and would fail `fanout.mjs owns`, and show the exact sequence: run the shared step(s) sequentially on `main` first, then fan out the disjoint screen/app steps.*
   - **`SEQUENTIAL ONLY (FAN-OUT NOT SAFE / NOT APPLICABLE)`**: All remaining steps modify overlapping shared files, or only 1 step remains, or the repository is in `setup` / `decide` / `IDLE` / `NONE` state.
   - **`BATCH RESUME / MERGE`**: A `VALIDATION` `Batch:` row is already `NOW` or active worktrees are present and need review, `fanout.mjs owns` verification, merge, and batch closure.
+  - **`AFTER-NOW: SEQUENTIAL GATE -> FAN-OUT BATCH`**: `fanoutAnalysis.mode` is `after-now`; the current `NOW` is not in the parallel slice. Report `prerequisiteId` as the only immediate run and `parallelIds` as available after it closes.
 
 ## Required Output Structure
 
@@ -74,7 +75,7 @@ Always respond with these four sections:
 List the numbered `options` from `status.mjs --json` (or `preflight.conflicts[0].options` if the user's prompt had a preflight conflict), always marking option 1 with **`(Recommended)`** and showing the exact `/carapace ...` command for each option.
 
 ### 3. Fan-Out Feasibility Verdict
-- **Verdict**: `FAN-OUT READY` | `HYBRID: SEQUENTIAL FIRST -> FAN-OUT BATCH` | `SEQUENTIAL ONLY` | `BATCH RESUME`
+- **Verdict**: `FAN-OUT READY` | `HYBRID: SEQUENTIAL FIRST -> FAN-OUT BATCH` | `AFTER-NOW: SEQUENTIAL GATE -> FAN-OUT BATCH` | `SEQUENTIAL ONLY` | `BATCH RESUME`
 - **Architectural Reasoning**:
   - If sequential prerequisites exist: list the exact step ID(s) and the shared or on-disk files that force them to run on `main` first.
   - If a parallel `Batch:` is possible (now or after sequential prerequisites): list each worker slice (app or screen/module group), its step ID(s), proposed branch (`<audit>-apply/<slice>` or `batch/<slice>`), worktree path, and exact owned paths (`<owned-file-or-dir>...`, `docs/audit/<audit>/<app>/fixes/<STEP>.json`, `<proof-dir>/<STEP>.json`).
