@@ -890,4 +890,82 @@ test('enforces docs/execution-plan.md as canonical path and handles historical p
   )
 })
 
+function writeCanonicalSkillPackage(root, packageSubdir = 'skills/execution-plan-integrity') {
+  const pkgRoot = packageSubdir ? join(root, packageSubdir) : root
+  const files = {
+    'package.json': `${JSON.stringify({ name: 'execution-plan-integrity-skill', type: 'module' }, null, 2)}\n`,
+    'SKILL.md': '---\nname: execution-plan-integrity\ndescription: Skill.\n---\n\n# Execution Plan Integrity\n',
+    'scripts/artifact.mjs': 'export const SKILL_NAME = "execution-plan-integrity"\n',
+    'scripts/validate.mjs': 'export function validateSkill() { return [] }\n',
+    'assets/checker/check-execution-plan.mjs': 'export {}\n',
+    'assets/checker/execution-register.mjs': 'export {}\n',
+    'assets/checker/completion-proof.mjs': 'export {}\n',
+  }
+  for (const [rel, contents] of Object.entries(files)) {
+    const target = join(pkgRoot, rel)
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, contents)
+  }
+}
+
+test('excludes canonical execution-plan-integrity source package checkers in monorepo and standalone checkouts', () => {
+  const monorepo = fixture()
+  writeCanonicalSkillPackage(monorepo, 'skills/execution-plan-integrity')
+  assert.deepEqual(checkExecutionProject({ root: monorepo }), [])
+
+  const standalone = fixture()
+  writeCanonicalSkillPackage(standalone, '')
+  assert.deepEqual(checkExecutionProject({ root: standalone }), [])
+})
+
+test('rejects extra checker duplicates inside a canonical source repo', () => {
+  const root = fixture()
+  writeCanonicalSkillPackage(root, 'skills/execution-plan-integrity')
+  mkdirSync(join(root, 'scripts'), { recursive: true })
+  writeFileSync(join(root, 'scripts/check-execution-plan.mjs'), 'export {}\n')
+  writeFileSync(join(root, 'skills/execution-plan-integrity/assets/checker/execution-plan-integrity.test.mjs'), 'export {}\n')
+  const findings = checkExecutionProject({ root })
+  assert.ok(findings.includes('scripts/check-execution-plan.mjs duplicates the global execution-plan-integrity implementation'))
+  assert.ok(findings.includes(
+    'skills/execution-plan-integrity/assets/checker/execution-plan-integrity.test.mjs duplicates the global execution-plan-integrity implementation',
+  ))
+})
+
+test('rejects target-repo checker copies under skills/execution-plan-integrity/assets/checker/ or assets/checker/ without source markers', () => {
+  const vendored = fixture()
+  mkdirSync(join(vendored, 'skills/execution-plan-integrity/assets/checker'), { recursive: true })
+  writeFileSync(
+    join(vendored, 'skills/execution-plan-integrity/SKILL.md'),
+    '---\nname: execution-plan-integrity\ndescription: Vendored copy.\n---\n',
+  )
+  writeFileSync(join(vendored, 'skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs'), 'export {}\n')
+  assert.ok(checkExecutionProject({ root: vendored }).includes(
+    'skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs duplicates the global execution-plan-integrity implementation',
+  ))
+
+  const bareAssets = fixture()
+  mkdirSync(join(bareAssets, 'assets/checker'), { recursive: true })
+  writeFileSync(join(bareAssets, 'assets/checker/check-execution-plan.mjs'), 'export {}\n')
+  writeFileSync(join(bareAssets, 'assets/checker/execution-register.mjs'), 'export {}\n')
+  const bareFindings = checkExecutionProject({ root: bareAssets })
+  assert.ok(bareFindings.includes('assets/checker/check-execution-plan.mjs duplicates the global execution-plan-integrity implementation'))
+  assert.ok(bareFindings.includes('assets/checker/execution-register.mjs duplicates the global execution-plan-integrity implementation'))
+
+  for (const mutate of [
+    (root) => writeFileSync(join(root, 'skills/execution-plan-integrity/package.json'), '{"name":"other-pkg"}\n'),
+    (root) => writeFileSync(join(root, 'skills/execution-plan-integrity/package.json'), '{not-json\n'),
+    (root) => writeFileSync(join(root, 'skills/execution-plan-integrity/SKILL.md'), '---\nname: other-skill\n---\n'),
+    (root) => rmSync(join(root, 'skills/execution-plan-integrity/scripts/artifact.mjs')),
+    (root) => rmSync(join(root, 'skills/execution-plan-integrity/scripts/validate.mjs')),
+  ]) {
+    const partial = fixture()
+    writeCanonicalSkillPackage(partial, 'skills/execution-plan-integrity')
+    mutate(partial)
+    assert.ok(checkExecutionProject({ root: partial }).includes(
+      'skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs duplicates the global execution-plan-integrity implementation',
+    ))
+  }
+})
+
+
 

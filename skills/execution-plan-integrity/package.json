@@ -9,6 +9,6 @@
   },
   "scripts": {
     "lint": "node scripts/validate.mjs",
-    "test": "node --test tests/skill.test.mjs assets/checker/execution-register.test.mjs"
+    "test": "node --test tests/skill.test.mjs tests/config.test.mjs assets/checker/execution-register.test.mjs"
   }
 }

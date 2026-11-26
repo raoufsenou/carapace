@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, globSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, statSync } from 'node:fs'
 import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkCompletionProofs } from './completion-proof.mjs'
@@ -30,6 +30,62 @@ const LOCAL_IMPLEMENTATION_GLOBS = [
   '**/completion-proof.{js,mjs,cjs,ts}',
   '**/execution-plan-integrity.test.{js,mjs,cjs,ts,tsx}',
 ]
+const CANONICAL_CHECKER_FILES = new Set([
+  'check-execution-plan.mjs',
+  'execution-register.mjs',
+  'completion-proof.mjs',
+])
+const CANONICAL_CHECKER_PREFIXES = [
+  { prefix: 'skills/execution-plan-integrity/assets/checker/', packageSubdir: 'skills/execution-plan-integrity' },
+  { prefix: 'assets/checker/', packageSubdir: '' },
+]
+
+function isFile(path) {
+  try {
+    return statSync(path).isFile()
+  } catch {
+    return false
+  }
+}
+
+export function isCanonicalSkillPackageChecker(root, relativePath) {
+  const normalized = portable(relativePath)
+  let packageRoot = null
+  for (const { prefix, packageSubdir } of CANONICAL_CHECKER_PREFIXES) {
+    if (!normalized.startsWith(prefix)) continue
+    const fileName = normalized.slice(prefix.length)
+    if (CANONICAL_CHECKER_FILES.has(fileName)) {
+      packageRoot = packageSubdir ? join(root, packageSubdir) : root
+    }
+    break
+  }
+  if (!packageRoot) return false
+
+  const packageJsonPath = join(packageRoot, 'package.json')
+  const skillPath = join(packageRoot, 'SKILL.md')
+  if (
+    !isFile(packageJsonPath)
+    || !isFile(skillPath)
+    || !isFile(join(packageRoot, 'scripts/artifact.mjs'))
+    || !isFile(join(packageRoot, 'scripts/validate.mjs'))
+  ) {
+    return false
+  }
+
+  let pkg
+  try {
+    pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8'))
+  } catch {
+    return false
+  }
+  if (pkg?.name !== 'execution-plan-integrity-skill') return false
+
+  const skillText = readFileSync(skillPath, 'utf8')
+  const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(skillText)?.[1]
+  if (!frontmatter) return false
+  const skillName = /^name:\s*(.+)$/m.exec(frontmatter)?.[1]?.trim()
+  return skillName === 'execution-plan-integrity'
+}
 
 function portable(path) {
   return path.split(sep).join('/')
@@ -195,6 +251,7 @@ export function checkExecutionProject({ root = process.cwd(), configPath = DEFAU
 
   for (const path of matches(root, LOCAL_IMPLEMENTATION_GLOBS)) {
     if (path.startsWith('node_modules/')) continue
+    if (isCanonicalSkillPackageChecker(root, path)) continue
     findings.push(`${path} duplicates the global execution-plan-integrity implementation`)
   }
 
