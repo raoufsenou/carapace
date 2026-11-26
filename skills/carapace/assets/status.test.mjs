@@ -12,6 +12,7 @@ import {
   readCarapaceStatus,
 } from './status.mjs'
 import { analyzeFanoutReadiness } from './fanout.mjs'
+import { evaluatePromptConflicts, optionCapability } from './prompt.mjs'
 import { readRequirementsBrief, targetTaskId, targetTaskIds } from './requirements.mjs'
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'status.mjs')
@@ -1134,4 +1135,395 @@ test('requirements extraction aggregates multi-task prompts and Batch rows with 
   assert.equal(batchDirect.requirements.taskId, 'BATCH-1')
   assert.equal(batchDirect.requirements.source.path, 'docs/batch-direct.md')
   assert.deepEqual(batchDirect.preflight.conflicts.map((c) => c.kind), [])
+})
+
+test('every proceed-without preflight option bypasses its conflict without looping (REQ-RW-6)', () => {
+  const docsCaps = {
+    profile: 'docs-only',
+    values: {
+      uiAudit: { enabled: false, source: 'profile' },
+      nonUiAudit: { enabled: false, source: 'profile' },
+      fanoutWorktrees: { enabled: false, source: 'profile' },
+      devServer: { enabled: false, source: 'profile' },
+      testGates: { enabled: false, source: 'profile' },
+    },
+  }
+  const cases = [
+    {
+      kind: 'capability-disabled',
+      prompt: '/carapace audit screens and UI',
+      status: {
+        initialized: true,
+        now: 'P1.1',
+        rows: [{ id: 'P1.1', state: 'NOW', kind: 'IMPLEMENTATION', work: 'Write docs.' }],
+        capabilities: docsCaps,
+      },
+    },
+    {
+      kind: 'unmigrated-queue',
+      prompt: '/carapace run BROWSER-WEB-APP',
+      status: {
+        initialized: true,
+        now: 'BROWSER-WEB-APP',
+        unmigratedNow: 'APP-AUDIT-FRAME',
+        rows: [{ id: 'BROWSER-WEB-APP', state: 'NOW', kind: 'IMPLEMENTATION', work: 'Parent.' }],
+      },
+    },
+    {
+      kind: 'unreconciled-multi-app-audit',
+      prompt: '/carapace decide verdicts for web',
+      status: {
+        initialized: true,
+        now: 'IDLE',
+        rows: [],
+        auditState: {
+          unreconciled: [{ audit: 'ui', apps: ['web@v1', 'admin@v1'] }],
+          undecided: [{ audit: 'ui', target: 'web', version: 1, openCount: 1, triggeredCount: 0, openReopens: [] }],
+        },
+      },
+    },
+    {
+      kind: 'undecided-audit-findings',
+      prompt: '/carapace run P1.1',
+      status: {
+        initialized: true,
+        now: 'P1.1',
+        rows: [{ id: 'P1.1', state: 'NOW', kind: 'IMPLEMENTATION', work: 'Build feature.' }],
+        auditState: {
+          unreconciled: [],
+          undecided: [{ audit: 'ui', target: 'web', version: 1, openCount: 2, triggeredCount: 0, openReopens: [] }],
+        },
+      },
+    },
+  ]
+
+  for (const { kind, prompt, status } of cases) {
+    const initial = evaluatePromptConflicts(status, prompt)
+    const conflict = initial.conflicts.find((c) => c.kind === kind)
+    assert.ok(conflict, `${kind} should fire initially`)
+    const option2 = conflict.options[1]
+    assert.equal(option2.recommended, false)
+    assert.doesNotMatch(option2.command, /\/carapace\s+\/carapace/i)
+
+    for (const replay of [option2.command, option2.command.replace(/^\/carapace\s+/i, '')]) {
+      const rerun = evaluatePromptConflicts(status, replay)
+      const kinds = rerun.conflicts.map((c) => c.kind)
+      assert.equal(kinds.includes(kind), false, `${kind} must not recur for "${replay}"`)
+      assert.equal(kinds.includes('active-now-task'), false, `no spurious active-now-task for "${replay}"`)
+      assert.equal(kinds.includes('no-undecided-findings'), false, `no spurious no-undecided-findings for "${replay}"`)
+    }
+  }
+
+  // Replaying "proceed without verdicts:" when undecided is empty must not trigger no-undecided-findings.
+  const afterDecided = evaluatePromptConflicts(
+    {
+      initialized: true,
+      now: 'P1.1',
+      rows: [{ id: 'P1.1', state: 'NOW', kind: 'IMPLEMENTATION', work: 'Build feature.' }],
+      auditState: { unreconciled: [], undecided: [] },
+    },
+    '/carapace proceed without verdicts: run P1.1',
+  )
+  assert.deepEqual(afterDecided.conflicts.map((c) => c.kind), [])
+
+  // Cross-conflict isolation: bypassing unmigrated-queue does not silently bypass undecided-audit-findings.
+  const combinedStatus = {
+    initialized: true,
+    now: 'BROWSER-WEB-APP',
+    unmigratedNow: 'APP-AUDIT-FRAME',
+    rows: [{ id: 'BROWSER-WEB-APP', state: 'NOW', kind: 'IMPLEMENTATION', work: 'Parent.' }],
+    auditState: {
+      unreconciled: [],
+      undecided: [{ audit: 'ui', target: 'web', version: 1, openCount: 1, triggeredCount: 0, openReopens: [] }],
+    },
+  }
+  const both = evaluatePromptConflicts(combinedStatus, 'run BROWSER-WEB-APP')
+  assert.deepEqual(both.conflicts.map((c) => c.kind), ['unmigrated-queue', 'undecided-audit-findings'])
+
+  const afterMigrationBypass = evaluatePromptConflicts(combinedStatus, both.conflicts[0].options[1].command)
+  assert.deepEqual(afterMigrationBypass.conflicts.map((c) => c.kind), ['undecided-audit-findings'])
+
+  const afterBothBypasses = evaluatePromptConflicts(
+    combinedStatus,
+    afterMigrationBypass.conflicts[0].options[1].command,
+  )
+  assert.deepEqual(afterBothBypasses.conflicts.map((c) => c.kind), [])
+})
+
+test('capability and parallel preflight gating cover bare audits, plural keywords, and unsafe fan-out modes (REQ-RW-7)', () => {
+  const root = tempRepo()
+  write(
+    root,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `APP-AUDIT-HOME`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `APP-AUDIT-HOME` | `IMPLEMENTATION` | `NOW` | Update backend/src/contract.ts and frontend/src/api.ts. | Audit |',
+      '| 2 | `APP-AUDIT-SETTINGS` | `IMPLEMENTATION` | `QUEUED` | Update backend/src/contract.ts and frontend/src/api.ts. | Audit |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  const writeConfig = (extra) =>
+    write(
+      root,
+      '.execution-plan-integrity.json',
+      JSON.stringify({
+        schema: 2,
+        canonical: 'docs/execution-plan.md',
+        completionProofs: { directory: 'docs/execution-proofs' },
+        ...extra,
+      }),
+    )
+
+  writeConfig({ profile: 'docs-only' })
+  for (const prompt of ['audit', '/carapace audit']) {
+    const bareDocs = readCarapaceStatus({ root, prompt })
+    const capConflict = bareDocs.preflight.conflicts.find((c) => c.kind === 'capability-disabled')
+    assert.ok(capConflict, `bare "${prompt}" on docs-only must raise capability-disabled`)
+    assert.match(capConflict.message, /capabilities\.uiAudit/)
+    assert.match(capConflict.message, /capabilities\.nonUiAudit/)
+    assert.equal(bareDocs.options.find((o) => o.id === 'audit')?.disabled, undefined)
+  }
+
+  // Task IDs containing AUDIT, FANOUT, or BROWSER must not falsely trigger capability or parallel checks.
+  write(
+    root,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `APP-AUDIT-HOME`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `APP-AUDIT-HOME` | `IMPLEMENTATION` | `NOW` | Update backend/src/contract.ts and frontend/src/api.ts. | Audit |',
+      '| 2 | `RW-FANOUT-REQ` | `IMPLEMENTATION` | `QUEUED` | Update backend/src/contract.ts and frontend/src/api.ts. | Audit |',
+      '| 3 | `BROWSER-WEB-APP` | `IMPLEMENTATION` | `QUEUED` | Update backend/src/contract.ts and frontend/src/api.ts. | Audit |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  for (const prompt of ['run RW-FANOUT-REQ', 'run APP-AUDIT-HOME', 'run BROWSER-WEB-APP']) {
+    const taskIdRun = readCarapaceStatus({ root, prompt })
+    assert.equal(taskIdRun.preflight.conflicts.some((c) => c.kind === 'capability-disabled'), false, `${prompt} must not trigger capability-disabled`)
+    assert.equal(taskIdRun.preflight.conflicts.some((c) => c.kind === 'parallel-not-ready'), false, `${prompt} must not trigger parallel-not-ready`)
+  }
+
+  // Plural worktrees and bare parallel trigger fanoutWorktrees capability gating.
+  for (const prompt of ['run in worktrees', 'run parallel', 'fan out tasks', 'run batch']) {
+    const status = readCarapaceStatus({ root, prompt })
+    const capConflict = status.preflight.conflicts.find((c) => c.kind === 'capability-disabled')
+    assert.ok(capConflict, `"${prompt}" must trigger capability-disabled for fanoutWorktrees`)
+    assert.match(capConflict.message, /capabilities\.fanoutWorktrees/)
+  }
+
+  assert.equal(optionCapability('/carapace run in worktrees'), 'fanoutWorktrees')
+  assert.equal(optionCapability('/carapace run parallel'), 'fanoutWorktrees')
+  assert.equal(optionCapability('/carapace fan out A B'), 'fanoutWorktrees')
+  assert.equal(optionCapability('/carapace run batch'), 'fanoutWorktrees')
+  assert.equal(optionCapability('/carapace audit non-ui'), 'nonUiAudit')
+  assert.equal(optionCapability('/carapace audit'), null)
+
+  // Backend profile keeps nonUiAudit enabled, so bare /carapace audit and /carapace audit non-ui are allowed.
+  writeConfig({ profile: 'backend' })
+  for (const prompt of ['/carapace audit', '/carapace audit non-ui']) {
+    const backendAudit = readCarapaceStatus({ root, prompt })
+    assert.equal(backendAudit.preflight.conflicts.some((c) => c.kind === 'capability-disabled'), false, `"${prompt}" must not trigger capability-disabled on backend`)
+  }
+
+  // Fullstack (fanoutWorktrees enabled) on sequential register raises parallel-not-ready for parallel requests, not hyphenated IDs.
+  writeConfig({ profile: 'fullstack' })
+  assert.equal(
+    readCarapaceStatus({ root, prompt: 'run RW-FANOUT-REQ' }).preflight.conflicts.some((c) => c.kind === 'parallel-not-ready'),
+    false,
+  )
+  for (const prompt of ['run in parallel', 'run parallel', 'run in worktrees']) {
+    const seq = readCarapaceStatus({ root, prompt })
+    assert.equal(seq.fanoutAnalysis.mode, 'sequential')
+    const conflict = seq.preflight.conflicts.find((c) => c.kind === 'parallel-not-ready')
+    assert.ok(conflict, `"${prompt}" on sequential register must raise parallel-not-ready`)
+    assert.equal(conflict.options[0].command, '/carapace run APP-AUDIT-HOME')
+    assert.equal(conflict.options[0].recommended, true)
+  }
+
+  // Idle register raises parallel-not-ready without emitting IDLE or NONE as runnable task IDs.
+  for (const pointer of ['IDLE', 'NONE']) {
+    write(
+      root,
+      'docs/execution-plan.md',
+      [
+        '<!-- execution-role: canonical -->',
+        '<!-- execution-register:start -->',
+        `\`NOW\`: \`${pointer}\``,
+        '',
+        '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+        '| --- | --- | --- | --- | --- | --- |',
+        '| 1 | `P1` | `IMPLEMENTATION` | `DONE` | Completed 2026-10-14; docs/execution-proofs/P1.json. | Proof |',
+        '<!-- execution-register:end -->',
+      ].join('\n'),
+    )
+    for (const prompt of ['run in parallel', 'run parallel', 'run in worktrees']) {
+      const idleStatus = readCarapaceStatus({ root, prompt })
+      assert.equal(idleStatus.fanoutAnalysis.mode, 'idle')
+      const conflict = idleStatus.preflight.conflicts.find((c) => c.kind === 'parallel-not-ready')
+      assert.ok(conflict, `"${prompt}" on ${pointer} must raise parallel-not-ready`)
+      for (const option of conflict.options) {
+        assert.doesNotMatch(option.command, /\b(?:IDLE|NONE)\b/i)
+      }
+    }
+  }
+})
+
+test('preflight guards IDLE/NONE, checks bare task-ID runs, and anchors lifecycle keywords (REQ-RW-8)', () => {
+  // Extra git worktrees on NOW: IDLE and NOW: NONE never emit IDLE/NONE as a runnable task ID.
+  for (const pointer of ['IDLE', 'NONE']) {
+    const wtStatus = {
+      initialized: true,
+      now: pointer,
+      isBatch: false,
+      rows: [{ id: 'P1', state: 'DONE', kind: 'IMPLEMENTATION', work: 'Done.' }],
+      unorderedRows: [],
+      gitState: {
+        isGitRepo: true,
+        worktrees: [
+          { path: '/tmp/repo', branch: 'main' },
+          { path: '/tmp/repo/.worktree/slice-a', branch: 'slice-a' },
+        ],
+      },
+      options: [{ id: 'plan', label: 'Plan a task (Recommended)', recommended: true, command: '/carapace' }],
+    }
+    for (const prompt of ['run', 'execute', 'build feature', `run ${pointer}`]) {
+      const preflight = evaluatePromptConflicts(wtStatus, prompt)
+      const wtConflict = preflight.conflicts.find((c) => c.kind === 'active-batch-worktrees')
+      assert.ok(wtConflict, `"${prompt}" with extra worktrees on ${pointer} must raise active-batch-worktrees`)
+      assert.doesNotMatch(wtConflict.message, /\b(?:Batch|run|close)\s+(?:IDLE|NONE)\b/i)
+      for (const option of wtConflict.options) {
+        assert.doesNotMatch(option.command, /\b(?:IDLE|NONE)\b/i)
+      }
+    }
+  }
+
+  // Bare run/execute and unknown task IDs on IDLE/NONE raise no-active-now-task and never requirements-not-locked.
+  const root = tempRepo()
+  write(
+    root,
+    '.execution-plan-integrity.json',
+    JSON.stringify({
+      schema: 2,
+      canonical: 'docs/execution-plan.md',
+      completionProofs: { directory: 'docs/execution-proofs' },
+      roles: { design: ['docs/*.md'] },
+    }),
+  )
+  for (const pointer of ['IDLE', 'NONE']) {
+    write(
+      root,
+      'docs/execution-plan.md',
+      [
+        '<!-- execution-role: canonical -->',
+        '<!-- execution-register:start -->',
+        `\`NOW\`: \`${pointer}\``,
+        ...(pointer === 'IDLE' ? ['`IDLE REASON`: Waiting on `AUDIT-DEPENDENCY-SECURITY`.', '`RESUME WHEN`: Trigger fires.'] : []),
+        '',
+        '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+        '| --- | --- | --- | --- | --- | --- |',
+        '| 1 | `P1` | `IMPLEMENTATION` | `DONE` | Completed 2026-10-14; docs/execution-proofs/P1.json. | Proof |',
+        ...(pointer === 'IDLE'
+          ? [
+              '',
+              '| ID | Kind | State | Work | Trigger or owner |',
+              '| --- | --- | --- | --- | --- |',
+              '| `AUDIT-DEPENDENCY-SECURITY` | `VALIDATION` | `DEFERRED` | Dependency audit. | Trigger. |',
+            ]
+          : []),
+        '<!-- execution-register:end -->',
+      ].join('\n'),
+    )
+    for (const prompt of ['/carapace run', '/carapace execute', 'run UNKNOWN-99', 'execute UNKNOWN-99', 'UNKNOWN-99']) {
+      for (const yolo of [true, false]) {
+        const status = readCarapaceStatus({ root, prompt, yolo })
+        const conflictKinds = status.preflight.conflicts.map((c) => c.kind)
+        const warningKinds = status.preflight.warnings.map((w) => w.kind)
+        assert.ok(conflictKinds.includes('no-active-now-task'), `"${prompt}" on ${pointer} (yolo=${yolo}) must raise no-active-now-task`)
+        assert.equal(conflictKinds.includes('requirements-not-locked'), false, `"${prompt}" on ${pointer} must not raise requirements-not-locked`)
+        assert.equal(warningKinds.includes('requirements-not-locked'), false, `"${prompt}" on ${pointer} must not warn requirements-not-locked`)
+      }
+    }
+    if (pointer === 'IDLE') {
+      const deferredRun = readCarapaceStatus({ root, prompt: 'run AUDIT-DEPENDENCY-SECURITY' })
+      assert.equal(deferredRun.preflight.conflicts.some((c) => c.kind === 'no-active-now-task'), false)
+    }
+  }
+
+  // Prose containing report/lock/plan/status/next/requirements triggers active-now-task; anchored lifecycle commands do not.
+  write(
+    root,
+    'docs/execution-plan.md',
+    [
+      '<!-- execution-role: canonical -->',
+      '<!-- execution-register:start -->',
+      '`NOW`: `REQ-TEST-STEP`',
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| --- | --- | --- | --- | --- | --- |',
+      '| 1 | `REQ-TEST-STEP` | `IMPLEMENTATION` | `NOW` | Implement preflight hardening. | Plan |',
+      '<!-- execution-register:end -->',
+    ].join('\n'),
+  )
+  for (const prose of [
+    'build a monthly report export',
+    'fix the row lock contention bug',
+    'add a billing plan switcher',
+    'show account status badge',
+    'update order status',
+    'document next steps for release',
+    'gather user requirements for search',
+  ]) {
+    const res = readCarapaceStatus({ root, prompt: `/carapace ${prose}` })
+    const active = res.preflight.conflicts.find((c) => c.kind === 'active-now-task')
+    assert.ok(active, `"${prose}" must trigger active-now-task`)
+    assert.equal(active.options[1].command, `/carapace preempt REQ-TEST-STEP: ${prose}`)
+    const preempted = readCarapaceStatus({ root, prompt: active.options[1].command })
+    assert.deepEqual(preempted.preflight.conflicts.map((c) => c.kind), [])
+  }
+
+  // Bare task-ID prompts check requirements: warning in yolo, blocking conflict in --no-yolo, clean when locked.
+  for (const prompt of ['REQ-TEST-STEP', '/carapace REQ-TEST-STEP', '`REQ-TEST-STEP`']) {
+    const yoloMissing = readCarapaceStatus({ root, prompt, yolo: true })
+    assert.equal(yoloMissing.preflight.hasConflict, false)
+    assert.equal(yoloMissing.preflight.warnings[0]?.kind, 'requirements-not-locked')
+
+    const gatedMissing = readCarapaceStatus({ root, prompt, yolo: false })
+    assert.equal(gatedMissing.preflight.hasConflict, true)
+    assert.equal(gatedMissing.preflight.conflicts[0]?.kind, 'requirements-not-locked')
+    assert.equal(gatedMissing.preflight.conflicts[0]?.options[0].command, '/carapace lock in the requirements for REQ-TEST-STEP')
+  }
+
+  write(
+    root,
+    'docs/req-authority.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for `REQ-TEST-STEP`.',
+      '### REQ-1 — Preflight holds',
+    ].join('\n'),
+  )
+  for (const prompt of [
+    'REQ-TEST-STEP',
+    '/carapace REQ-TEST-STEP',
+    'report web',
+    'lock in the requirements for REQ-TEST-STEP',
+    'plan ',
+    'status',
+    'verify',
+    'check',
+  ]) {
+    const clean = readCarapaceStatus({ root, prompt, yolo: false })
+    assert.deepEqual(clean.preflight.conflicts.map((c) => c.kind), [], `"${prompt}" must not conflict`)
+    assert.deepEqual(clean.preflight.warnings, [], `"${prompt}" must not warn`)
+  }
 })

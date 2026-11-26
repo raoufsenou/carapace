@@ -354,27 +354,130 @@ function buildStageAndOptions(status) {
   }
 }
 
+const RESERVED_NOW_VALUES = new Set(['IDLE', 'NONE', 'SETUP'])
+const AUDIT_KEYWORDS_RE = /(?<![A-Za-z0-9_-])(?:re-?)?audit(?![A-Za-z0-9_-])/i
+const UI_AUDIT_SCOPE_RE = /(?:(?<!non-)\bui\b|\b(?:screens?|layout|visual|frontend|rendered)\b)/i
+const NON_UI_AUDIT_SCOPE_RE = /\b(?:backend|data|api|cli|code|non-?ui)\b/i
+const PARALLEL_KEYWORDS_RE = /(?<![A-Za-z0-9_-])(?:parallel|fan[\s-]?out|batch|worktrees?)(?![A-Za-z0-9_-])/i
+const DEV_SERVER_KEYWORDS_RE =
+  /(?<![A-Za-z0-9_-])(?:dev server|serve|browser|capture|screenshot|rendered app)(?![A-Za-z0-9_-])/i
+
+function hasRunnableNow(value) {
+  return typeof value === 'string' && value.length > 0 && !RESERVED_NOW_VALUES.has(value.toUpperCase())
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function taskIdMatches(haystack, id) {
+  return new RegExp(`(?<![A-Za-z0-9._-])${escapeRegExp(id)}(?![A-Za-z0-9_-]|\\.[A-Za-z0-9])`, 'i').test(haystack)
+}
+
+function hasBypass(source, specificPattern) {
+  return specificPattern.test(source) || /\bproceed\s+without\s*:/i.test(source)
+}
+
+function isFallbackTaskId(token) {
+  return (
+    token.length >= 2 &&
+    !RESERVED_NOW_VALUES.has(token) &&
+    /[0-9.-]/.test(token) &&
+    /^[A-Z][A-Z0-9]*(?:[.-][A-Z0-9]+)*$/.test(token)
+  )
+}
+
+function isBareTaskIdPrompt(command, knownIdSetUpper) {
+  const body = command
+    .replace(/\s+(?:in\s+parallel|parallel|in\s+worktrees?)$/i, '')
+    .replace(/\.+$/, '')
+    .trim()
+  if (!body) return false
+  const rawTokens = body.split(/(?:\s*,\s*|\s+)/).filter(Boolean)
+  if (rawTokens.length === 0) return false
+  const tokens = []
+  let expectId = true
+  for (const raw of rawTokens) {
+    if (!expectId && /^and$/i.test(raw)) {
+      expectId = true
+      continue
+    }
+    const token = raw.replace(/^`([^`]+)`$/, '$1')
+    if (!token) return false
+    if (!knownIdSetUpper.has(token.toUpperCase()) && !isFallbackTaskId(token)) return false
+    tokens.push(token)
+    expectId = false
+  }
+  return tokens.length > 0 && !expectId
+}
+
 export function evaluatePromptConflicts(status, rawPrompt) {
   const text = (rawPrompt ?? '').trim()
   if (!text) return { hasConflict: false, conflicts: [], warnings: [] }
+  const stripped = text.replace(/^\/carapace(?::carapace)?(?:\s+|$)/i, '').trim()
+  if (!stripped) return { hasConflict: false, conflicts: [], warnings: [] }
+  const commandText = stripped.replace(/^(?:proceed\s+with(?:out)?\b[^:]*:\s*)+/i, '').trim()
+  const cleanCommand = commandText
+    .replace(/(?<=^|\s)--(?:no-)?yolo(?=\s|$)/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!cleanCommand) return { hasConflict: false, conflicts: [], warnings: [] }
 
   const conflicts = []
   const warnings = []
-  const isSetup = /\b(?:setup|init|initialize|migrate)\b/i.test(text)
-  const isVerifyOnly = /\b(?:verify|status|check)\b/i.test(text) && !/\b(?:run|apply|fix|implement|build|add)\b/i.test(text)
+  const isSetup = /^(?:setup|init|initialize|migrate)\b/i.test(cleanCommand)
+  const isVerifyOnly =
+    /^(?:verify|status|check)\b/i.test(cleanCommand) &&
+    !/\b(?:run|execute|apply|fix|implement|build|add|refactor|create|update|change|remove|delete)\b/i.test(cleanCommand)
   if (isVerifyOnly) return { hasConflict: false, conflicts: [], warnings: [] }
 
+  const knownIdSetUpper = new Set()
+  for (const row of [...(status.rows ?? []), ...(status.unorderedRows ?? [])]) {
+    if (typeof row?.id !== 'string' || !row.id) continue
+    const upper = row.id.toUpperCase()
+    if (!RESERVED_NOW_VALUES.has(upper)) knownIdSetUpper.add(upper)
+  }
+  const mentionsKnownRow = (status.rows ?? []).some(
+    (row) => typeof row?.id === 'string' && row.id && !RESERVED_NOW_VALUES.has(row.id.toUpperCase()) && taskIdMatches(cleanCommand, row.id),
+  )
+  const mentionsKnownUnordered = (status.unorderedRows ?? []).some(
+    (row) => typeof row?.id === 'string' && row.id && !RESERVED_NOW_VALUES.has(row.id.toUpperCase()) && taskIdMatches(cleanCommand, row.id),
+  )
+  const mentionsKnownTask = mentionsKnownRow || mentionsKnownUnordered
+
   const capabilities = status.capabilities?.values
-  if (capabilities) {
+  const bypassCapability = hasBypass(
+    stripped,
+    /\bproceed\s+without\s+(?:capability|engine|that\s+engine|uiAudit|nonUiAudit|fanoutWorktrees|devServer|testGates)\b/i,
+  )
+  if (capabilities && !bypassCapability) {
     const needed = []
-    if (/\baudit\b/i.test(text) && /\b(?:ui|screens?|layout|visual|frontend|rendered)\b/i.test(text) && capabilities.uiAudit?.enabled === false) needed.push('uiAudit')
-    if (/\baudit\b/i.test(text) && /\b(?:backend|data|api|cli|code|non-?ui)\b/i.test(text) && capabilities.nonUiAudit?.enabled === false) needed.push('nonUiAudit')
-    if (/\b(?:in parallel|fan.?out|batch|worktree)\b/i.test(text) && capabilities.fanoutWorktrees?.enabled === false) needed.push('fanoutWorktrees')
-    if (/\b(?:dev server|serve|browser|capture|screenshot|rendered app)\b/i.test(text) && capabilities.devServer?.enabled === false) needed.push('devServer')
+    const asksAudit = AUDIT_KEYWORDS_RE.test(cleanCommand)
+    const asksUiAudit = asksAudit && UI_AUDIT_SCOPE_RE.test(cleanCommand)
+    const asksNonUiAudit = asksAudit && NON_UI_AUDIT_SCOPE_RE.test(cleanCommand)
+    if (asksUiAudit && capabilities.uiAudit?.enabled === false) needed.push('uiAudit')
+    if (asksNonUiAudit && capabilities.nonUiAudit?.enabled === false) needed.push('nonUiAudit')
+    if (
+      asksAudit &&
+      !asksUiAudit &&
+      !asksNonUiAudit &&
+      capabilities.uiAudit?.enabled === false &&
+      capabilities.nonUiAudit?.enabled === false
+    ) {
+      needed.push('uiAudit', 'nonUiAudit')
+    }
+    if (PARALLEL_KEYWORDS_RE.test(cleanCommand) && capabilities.fanoutWorktrees?.enabled === false) {
+      needed.push('fanoutWorktrees')
+    }
+    if (DEV_SERVER_KEYWORDS_RE.test(cleanCommand) && capabilities.devServer?.enabled === false) {
+      needed.push('devServer')
+    }
     if (needed.length > 0) {
+      const isBareBothAudits = needed.length === 2 && asksAudit && !asksUiAudit && !asksNonUiAudit
+      const keysText = needed.map((key) => `capabilities.${key}`).join(isBareBothAudits ? ' or ' : ' and ')
       conflicts.push({
         kind: 'capability-disabled',
-        message: `${needed.join(', ')} ${needed.length === 1 ? 'is' : 'are'} disabled in this repository's capability profile. Set capabilities.${needed[0]} to true in .execution-plan-integrity.json, then rerun; do not enable it silently.`,
+        message: `${needed.join(', ')} ${needed.length === 1 ? 'is' : 'are'} disabled in this repository's capability profile. Set ${keysText} to true in .execution-plan-integrity.json, then rerun; do not enable it silently.`,
         options: [
           {
             id: 'verify-capability',
@@ -386,7 +489,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
             id: 'proceed-without-capability',
             label: 'Proceed without that engine (the requested action cannot run)',
             recommended: false,
-            command: `/carapace ${text}`,
+            command: `/carapace proceed without capability: ${stripped}`,
           },
         ],
       })
@@ -435,7 +538,11 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     })
   }
 
-  if (status.unmigratedNow && !isSetup) {
+  const bypassMigration = hasBypass(
+    stripped,
+    /\bproceed\s+without\s+(?:migrating|migration|queue\s+migration)\b/i,
+  )
+  if (status.unmigratedNow && !isSetup && !bypassMigration) {
     conflicts.push({
       kind: 'unmigrated-queue',
       message: `${CANONICAL_PLAN_PATH} contains an unmigrated live queue row (${status.unmigratedNow}) outside the canonical register.`,
@@ -450,7 +557,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
           id: 'proceed-anyway',
           label: 'Proceed without migrating the outside table',
           recommended: false,
-          command: `/carapace ${text}`,
+          command: `/carapace proceed without migrating: ${stripped}`,
         },
       ],
     })
@@ -458,7 +565,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
 
   if (status.interruptedSteps?.length > 0) {
     const step = status.interruptedSteps[0]
-    if (!text.toUpperCase().includes(step.id.toUpperCase())) {
+    if (!taskIdMatches(cleanCommand, step.id)) {
       conflicts.push({
         kind: 'interrupted-step',
         message: `Step ${step.id} already has closure artifacts on disk (${step.files.join(', ')}) while its register row is still ${step.state}. Starting other work now would leave the register and proofs out of sync.`,
@@ -481,37 +588,64 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   }
 
   const extraWorktrees = (status.gitState?.worktrees ?? []).length > 1
-  if ((status.isBatch || extraWorktrees) && !text.toUpperCase().includes((status.now ?? '').toUpperCase())) {
-    const asksMutation = /\b(?:run|apply|fix|implement|build|add|refactor|create)\b/i.test(text)
+  const targetsActiveNow = hasRunnableNow(status.now) && taskIdMatches(cleanCommand, status.now)
+  if ((status.isBatch || extraWorktrees) && !targetsActiveNow) {
+    const asksMutation =
+      /\b(?:run|execute|apply|fix|implement|build|add|refactor|create)\b/i.test(cleanCommand) ||
+      isBareTaskIdPrompt(cleanCommand, knownIdSetUpper)
     if (asksMutation) {
-      conflicts.push({
-        kind: 'active-batch-worktrees',
-        message: `Batch ${status.now} or linked git worktrees are currently active. Mutating main or starting unrelated work before active worktrees are verified, merged, and closed risks merge conflicts and invalidates the batch base commit.`,
-        options: [
-          {
-            id: 'finish-batch',
-            label: `Verify, merge, and close ${status.now} first, then run your request (Recommended)`,
-            recommended: true,
-            command: `/carapace run ${status.now}`,
-          },
-          {
-            id: 'inspect-batch',
-            label: 'Inspect active worktrees and batch status',
-            recommended: false,
-            command: '/carapace verify',
-          },
-        ],
-      })
+      if (hasRunnableNow(status.now)) {
+        conflicts.push({
+          kind: 'active-batch-worktrees',
+          message: `Batch ${status.now} or linked git worktrees are currently active. Mutating main or starting unrelated work before active worktrees are verified, merged, and closed risks merge conflicts and invalidates the batch base commit.`,
+          options: [
+            {
+              id: 'finish-batch',
+              label: `Verify, merge, and close ${status.now} first, then run your request (Recommended)`,
+              recommended: true,
+              command: `/carapace run ${status.now}`,
+            },
+            {
+              id: 'inspect-batch',
+              label: 'Inspect active worktrees and batch status',
+              recommended: false,
+              command: '/carapace verify',
+            },
+          ],
+        })
+      } else {
+        conflicts.push({
+          kind: 'active-batch-worktrees',
+          message: `Linked git worktrees are currently active while NOW is ${status.now ?? 'unset'}. Mutating main or starting unrelated work before active worktrees are verified, merged, and removed risks merge conflicts.`,
+          options: [
+            {
+              id: 'inspect-worktrees',
+              label: 'Inspect active worktrees and repository status before merging or removing them (Recommended)',
+              recommended: true,
+              command: '/carapace verify',
+            },
+            {
+              id: 'open-menu',
+              label: 'Open the Carapace status menu',
+              recommended: false,
+              command: '/carapace',
+            },
+          ],
+        })
+      }
     }
   }
 
   if (status.auditState?.unreconciled?.length > 0) {
     const item = status.auditState.unreconciled[0]
+    const bypassReconcile = hasBypass(
+      stripped,
+      /\bproceed\s+with(?:out)?\s+(?:shared\s+)?(?:reconcil(?:iation|ing)|single-app)\b/i,
+    )
     const asksDecideOrFix =
-      /\b(?:decide|verdict|run|apply|fix|implement|build|execute)\b/i.test(text) &&
-      !/\breconcile\b/i.test(text) &&
-      !/\bproceed\s+with(?:out)?\b/i.test(text)
-    if (asksDecideOrFix) {
+      /\b(?:decide|verdicts?|run|apply|fix|implement|build|execute)\b/i.test(cleanCommand) &&
+      !/\breconcile\b/i.test(cleanCommand)
+    if (asksDecideOrFix && !bypassReconcile) {
       conflicts.push({
         kind: 'unreconciled-multi-app-audit',
         message: `Multiple apps (${item.apps.join(', ')}) have unreconciled ${item.audit} audit rounds. Deciding or fixing one app before reconciling docs/audit/${item.audit}/shared/ risks fixing shared code twice in incompatible ways.`,
@@ -526,7 +660,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
             id: 'proceed-single-app',
             label: 'Proceed with single-app verdicts without shared reconciliation',
             recommended: false,
-            command: `/carapace ${text}`,
+            command: `/carapace proceed without reconciliation: ${stripped}`,
           },
         ],
       })
@@ -536,11 +670,14 @@ export function evaluatePromptConflicts(status, rawPrompt) {
   if (status.auditState?.undecided?.length > 0) {
     const item = status.auditState.undecided[0]
     const totalOpen = item.openCount + item.triggeredCount + item.openReopens.length
+    const bypassVerdicts = hasBypass(
+      stripped,
+      /\bproceed\s+without\s+(?:recording\s+)?verdicts?\b/i,
+    )
     const asksApplyOrNewAudit =
-      /\b(?:run|apply|fix|implement|build|execute|audit)\b/i.test(text) &&
-      !/\b(?:decide|verdict)\b/i.test(text) &&
-      !/\bproceed\s+with(?:out)?\b/i.test(text)
-    if (asksApplyOrNewAudit) {
+      /\b(?:run|apply|fix|implement|build|execute|audit)\b/i.test(cleanCommand) &&
+      !/\b(?:decide|verdicts?)\b/i.test(cleanCommand)
+    if (asksApplyOrNewAudit && !bypassVerdicts) {
       conflicts.push({
         kind: 'undecided-audit-findings',
         message: `${item.target} (${item.audit} v${item.version}) still has ${totalOpen} undecided finding(s)/reopen proposal(s). Applying fixes or starting a new audit round before recording v${item.version} verdicts breaks audit continuity.`,
@@ -555,13 +692,13 @@ export function evaluatePromptConflicts(status, rawPrompt) {
             id: 'proceed-anyway',
             label: 'Proceed with your request without recording verdicts first',
             recommended: false,
-            command: `/carapace ${text}`,
+            command: `/carapace proceed without verdicts: ${stripped}`,
           },
         ],
       })
     }
   } else if (
-    /\b(?:decide|verdicts?)\b/i.test(text) &&
+    /\b(?:decide|verdicts?)\b/i.test(cleanCommand) &&
     !(status.auditState?.unreconciled?.length > 0)
   ) {
     const fallbackOptions =
@@ -582,15 +719,18 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     })
   }
 
-  const isBareRun = /^(?:\/carapace(?::carapace)?\s+)?run$/i.test(text)
-  if (
-    isBareRun &&
-    status.initialized &&
+  const isBareRunOrExecute = /^(?:run|execute)$/i.test(cleanCommand)
+  const asksRunOrExecuteUnknown = !isBareRunOrExecute && /^(?:run|execute)\b/i.test(cleanCommand) && !mentionsKnownTask
+  const isBareUnknownTaskId = isBareTaskIdPrompt(cleanCommand, knownIdSetUpper) && !mentionsKnownTask
+  const noActiveNowTask =
+    Boolean(status.initialized) &&
     (status.now === 'IDLE' || status.now === 'NONE') &&
     !(status.auditState?.undecided?.length > 0) &&
     !(status.auditState?.unreconciled?.length > 0) &&
-    !(status.auditState?.unappliedAccepted?.length > 0)
-  ) {
+    ((isBareRunOrExecute && !(status.auditState?.unappliedAccepted?.length > 0)) ||
+      asksRunOrExecuteUnknown ||
+      isBareUnknownTaskId)
+  if (noActiveNowTask) {
     conflicts.push({
       kind: 'no-active-now-task',
       message: `NOW is currently ${status.now} in ${CANONICAL_PLAN_PATH}; there is no active NOW task to execute until an OPEN/DEFERRED item is promoted or a new task is planned.`,
@@ -598,7 +738,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     })
   }
 
-  const asksParallel = /\b(?:parallel|fan-?out|batch|worktrees?)\b/i.test(text)
+  const asksParallel = PARALLEL_KEYWORDS_RE.test(cleanCommand)
   if (asksParallel && status.fanoutAnalysis?.mode === 'hybrid') {
     conflicts.push({
       kind: 'shared-prerequisite-before-fanout',
@@ -642,17 +782,75 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     })
   }
 
-  if (/\brun\b/i.test(text) && status.requirements && status.requirements.status !== 'LOCKED') {
-    const task = status.requirements.taskId ?? status.now ?? 'the task'
+  if (asksParallel && status.fanoutAnalysis?.mode === 'sequential') {
+    conflicts.push({
+      kind: 'parallel-not-ready',
+      message: 'The active register slice is sequential-only (steps overlap, lack explicit disjoint paths, or hit an intervening gate) and cannot safely fan out into parallel worktrees.',
+      options: hasRunnableNow(status.now)
+        ? [
+            {
+              id: 'run-sequential',
+              label: `Run ${status.now} sequentially on the current branch (Recommended)`,
+              recommended: true,
+              command: `/carapace run ${status.now}`,
+            },
+            {
+              id: 'verify-fanout',
+              label: 'Inspect register state before planning parallel work',
+              recommended: false,
+              command: '/carapace verify',
+            },
+          ]
+        : [
+            {
+              id: 'verify-fanout',
+              label: 'Inspect register state before planning parallel work (Recommended)',
+              recommended: true,
+              command: '/carapace verify',
+            },
+          ],
+    })
+  }
+
+  if (asksParallel && status.fanoutAnalysis?.mode === 'idle') {
+    conflicts.push({
+      kind: 'parallel-not-ready',
+      message: `NOW is ${status.now ?? 'IDLE'} (fan-out mode: idle); there are no active register steps to fan out in parallel worktrees.`,
+      options:
+        status.options?.length > 0
+          ? status.options
+          : [
+              {
+                id: 'verify-fanout',
+                label: 'Inspect register state before planning work (Recommended)',
+                recommended: true,
+                command: '/carapace verify',
+              },
+            ],
+    })
+  }
+
+  const reqTask = hasRunnableNow(status.requirements?.taskId)
+    ? status.requirements.taskId
+    : hasRunnableNow(status.now)
+      ? status.now
+      : null
+  const isLockOrPreempt = /^(?:lock|preempt)\b/i.test(cleanCommand)
+  const asksRunTask =
+    !isLockOrPreempt &&
+    (/^(?:run|execute)\b/i.test(cleanCommand) ||
+      (mentionsKnownTask && /(?<![A-Za-z0-9_-])(?:run|execute)(?![A-Za-z0-9_-])/i.test(cleanCommand)) ||
+      isBareTaskIdPrompt(cleanCommand, knownIdSetUpper))
+  if (reqTask && !noActiveNowTask && asksRunTask && status.requirements && status.requirements.status !== 'LOCKED') {
     const entry = {
       kind: 'requirements-not-locked',
-      message: `${task} has no locked requirements authority (status: ${status.requirements.status}). ${status.requirements.note ?? ''}`,
+      message: `${reqTask} has no locked requirements authority (status: ${status.requirements.status}). ${status.requirements.note ?? ''}`,
       options: [
         {
           id: 'lock-requirements',
-          label: `Lock in the requirements for ${task} and add the necessary tickets first (Recommended)`,
+          label: `Lock in the requirements for ${reqTask} and add the necessary tickets first (Recommended)`,
           recommended: true,
-          command: `/carapace lock in the requirements for ${task}`,
+          command: `/carapace lock in the requirements for ${reqTask}`,
         },
         {
           id: 'inspect-authority',
@@ -662,17 +860,15 @@ export function evaluatePromptConflicts(status, rawPrompt) {
         },
       ],
     }
-    // Yolo preflights and briefs, then proceeds. Only --no-yolo turns a missing
-    // authority into a blocking decision.
     if (status.gate?.yolo === false) conflicts.push(entry)
     else warnings.push({ ...entry, message: `${entry.message} Yolo will show this as the brief and proceed.` })
   }
 
-  const activeNow = status.initialized && status.now && status.now !== 'NONE' && status.now !== 'IDLE' && status.now !== 'SETUP'
-  const mentionsKnownTask =
-    (status.rows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase())) ||
-    (status.unorderedRows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase()))
-  const isLifecycleCommand = /\b(?:run|setup|init|migrate|audit|reconcile|decide|verdict|verify|status|advise|next|prompt|plan|report|yolo|lock|requirements)\b/i.test(text)
+  const activeNow = Boolean(status.initialized) && hasRunnableNow(status.now)
+  const isLifecycleCommand =
+    /^(?:run|execute|setup|init|initialize|migrate|audit|re-?audit|reconcile|decide|verdicts?|verify|check|status|advise|next|prompt|plan|report|yolo|lock|requirements|preempt|promote|proceed\s+without|apply\s+accepted\s+findings)\b/i.test(
+      cleanCommand,
+    )
   if (activeNow && !mentionsKnownTask && !isLifecycleCommand) {
     conflicts.push({
       kind: 'active-now-task',
@@ -688,7 +884,7 @@ export function evaluatePromptConflicts(status, rawPrompt) {
           id: 'preempt-now',
           label: `Preempt ${status.now} (move ${status.now} to QUEUED and make your new task NOW)`,
           recommended: false,
-          command: `/carapace preempt ${status.now}: ${text}`,
+          command: `/carapace preempt ${status.now}: ${stripped}`,
         },
       ],
     })
@@ -700,13 +896,13 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     warnings,
   }
 }
+
 export function optionCapability(command) {
   if (typeof command !== 'string') return null
-  const text = command.toLowerCase()
-  if (/\baudit\b/.test(text) && /\b(?:ui|screens?|layout|visual|frontend|rendered)\b/.test(text)) return 'uiAudit'
-  if (/\baudit\b/.test(text) && /\b(?:backend|data|api|cli|code|non-?ui)\b/.test(text)) return 'nonUiAudit'
-  if (/\b(?:in parallel|fan.?out|batch|worktree)\b/.test(text)) return 'fanoutWorktrees'
-  if (/\b(?:dev server|serve|browser|capture|screenshot|rendered app)\b/.test(text)) return 'devServer'
+  if (AUDIT_KEYWORDS_RE.test(command) && UI_AUDIT_SCOPE_RE.test(command)) return 'uiAudit'
+  if (AUDIT_KEYWORDS_RE.test(command) && NON_UI_AUDIT_SCOPE_RE.test(command)) return 'nonUiAudit'
+  if (PARALLEL_KEYWORDS_RE.test(command)) return 'fanoutWorktrees'
+  if (DEV_SERVER_KEYWORDS_RE.test(command)) return 'devServer'
   return null
 }
 
