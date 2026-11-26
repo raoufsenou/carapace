@@ -1,0 +1,46 @@
+# Audit, reconcile, and report
+
+> This reference is loaded from `skills/carapace/SKILL.md`. The root invariants and harness rules still apply.
+
+## Mode 2A: Audit lifecycle (`/carapace audit [scope]`)
+
+`reconcile` and `report` are steps inside this lifecycle. They remain available through the numbered menu and natural prompts, not as separate documented commands.
+
+Use when the user asks to run, reconcile, or rewrite an audit (with or without naming `ui` / `non-ui`).
+
+Read only `app-slop-audit/references/records.md` and the single mode reference you need (`references/ui.md` or `references/non-ui.md`, plus `references/report.md` when generating `review.html`). **Never** read `check-records.mjs`, `records.mjs`, `report.mjs`, `report.css`, or `report.js` source files (copy `report.css` and `report.js` via `cp`). Call `mcp__carapace__progress(title: "Audit <target>", phase: "plan", total: 1, done: 0)` at the start of the audit turn so the live HUD appears immediately.
+
+**Resolving Audit Scope Without Forcing `ui` / `non-ui` Flags**:
+- Internal records live under `docs/audit/ui/` (screens & visual UI) and `docs/audit/non-ui/` (backend, data, API, CLI, and code).
+- Determine which internal directory (`ui` vs `non-ui`) applies:
+  1. If the user's prompt mentions screens, pages, layout, visual polish, or `ui`, use `ui`.
+  2. If the user's prompt mentions backend, API, database, queries, security, CLI, worker, code, or `non-ui`, use `non-ui`.
+  3. If the repository has no frontend (`appProfile.hasUi === false` in `status.mjs --json`), automatically use `non-ui`.
+  4. If the user typed bare `/carapace audit` on a web/full-stack repository without specifying scope, present two plain-English numbered options and wait for their choice:
+     - `1. Audit screens & UI (Recommended)` -> `/carapace audit screens and UI`
+     - `2. Audit backend, data & code` -> `/carapace audit backend, data, and code`
+
+**Inspect `docs/audit/<audit>/` first (never combine `audit` / `reconcile` / `report` with `decide` or `apply` in one uninterrupted pass):**
+
+1. **Guard against undecided findings on the latest `v<N>.json`**:
+   - If the latest `v<N>.json` (in `docs/audit/<audit>/shared/` or `docs/audit/<audit>/<app>/`) still has undecided `open` findings or unanswered reopen proposals, **do not silently jump into `decide` and do not start `v<N+1>`**:
+     - Stop and present the numbered preflight options: `1. Record verdicts on the open findings of v<N> first (/carapace decide <app>) (Recommended)` vs `2. Proceed anyway`.
+2. **Unreconciled Multi-App Round or Report Correction (`reconcile` / `report`)**:
+   - **If rewriting a report (`report`)**: Follow `app-slop-audit` `Mode: report` steps 1–8 from existing captures and records before any verdicts exist on the latest version. Verify with `check-records.mjs <audit> <app> --report` and **stop** with `nextPrompt: "/carapace decide <app>"`.
+   - **If reconciling across apps (`reconcile`)**: Follow `app-slop-audit` `Mode: reconcile` steps 1–8 across all apps whose latest `v<N>.json` has no verdicts yet. Move shared-code findings into `docs/audit/<audit>/shared/v<N>.json` (and `shared/config.json` on v1), update each app's `v<N>.json` (`withdrawn` with `shared` or cut down to its local part), write `docs/audit/<audit>/shared/reports/v<N>/review.html` and rewrite each corrected app report, verify with `check-records.mjs <audit> --report`, and **stop** with `nextPrompt: "/carapace decide shared"`.
+3. **Run Next Audit Version (`v1` or `vN`, Single-App or Multi-App Fan-Out)**:
+   - Ensure `docs/audit/*/*/reports/` is in `.gitignore` and the committed toolkit directory named by `config.json` (e.g. `tools/audit/`) exists. If an app has no `config.json` yet, confirm severity definitions (`high`, `medium`, `low`) and `standards.designAuthority` with the maintainer one question at a time before writing `docs/audit/<audit>/<app>/config.json`.
+   - If `status.mjs --json` shows `auditState.targets` already has a clean `v<N>.json` at `HEAD` (`isClean: true` and `matchesHead: true`, e.g. left uncommitted from an interrupted turn), verify it with `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> <app>` instead of re-running the audit from scratch.
+   - **Zero-finding rule (`0` open findings)**:
+     - Every `v<N>.json` **always** requires `"report": "docs/audit/<audit>/<app>/reports/v<N>/review.html"` and a valid `reports/v<N>/review.html` (with `report.css` and `report.js` copied beside it via `cp`), even when `raised` is `[]` and `0` findings are open (`review.html` records each `rechecked` finding that `holds`, any `cleared` items, and the `id="coverage"` appendix, with no finding cards). On a multi-app re-audit (`v<N>` with `N > 1`), if no app raises or reopens any shared-code finding, `docs/audit/<audit>/shared/` stays at its existing version and does not add a `v<N>.json`.
+     - Whenever an audit (`v1` or `v<N>`) finishes with **0 open findings**, do **not** set `nextPrompt` to `/carapace decide <app>`! Instead, re-run `node <carapace-skill-path>/assets/status.mjs --root <repo> --json` and use its `nextPrompt` (which automatically advances to backend/non-UI audit, remaining `OPEN`/`DEFERRED` register work, or `/carapace`).
+   - **Single-app run (`<app>`)**:
+     - Follow `app-slop-audit` `Mode: audit` steps 1–9: record `git rev-parse --short HEAD`, tidy earlier report folders, capture from a production build at real-use dimensions into `docs/audit/<audit>/<app>/reports/v<N>/` (in `reports/v<N>/capture/*.mjs` scripts, import toolkit modules via `pathToFileURL(path.resolve(process.cwd(), 'tools/audit/...')).href` rather than counting `../` relative segments), re-check every earlier non-rejected/non-obsolete finding first, inspect for new findings (`A1`, `B1`, ...), write `docs/audit/<audit>/<app>/v<N>.json` and `reports/v<N>/review.html` from `<carapace-skill-path>/../app-slop-audit/assets/report/review.html` (copying `report.css` and `report.js` beside it via `cp`), verify with `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> <app> --report`, kill any server started for capture, update `IDLE REASON` / `RESUME WHEN` in `docs/execution-plan.md` when `NOW` is `IDLE` so it reflects that `v<N>` is recorded and awaiting `/carapace decide <app>`, and **stop** with `nextPrompt: "/carapace decide <app>"` (or the next stage from `status.mjs --json` if `0` open findings were raised).
+   - **Multi-app fan-out (`<app1>, <app2>, ...`)**:
+     - Follow `app-slop-audit/SKILL.md` (`One app or several`):
+       1. Confirm `git status` is clean and no one outside the run is working in the repo; record the audit fan-out in the canonical execution register (`docs/execution-plan.md`).
+       2. Confirm severity definitions for any app missing `config.json` upfront so no worker has to ask.
+       3. Build each app at the audited commit one after another and serve each on its own isolated port with its own data copy (and external/paid calls pointed at a refusing address), recording each server's PID.
+       4. Update `mcp__carapace__progress` (`title: "Audit <apps>"`, `phase: "delegate"`, `tasks`) and spawn one `carapace-heavy` or `carapace-careful` worker per app concurrently in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll `/tmp/` handoff files with `sleep` loops; **omit `model` on every spawn**). **Browser CDP isolation for `ui` audits**: if workers share a single Chrome DevTools / CDP instance, either assign each worker its own dedicated browser tab/target ID or serialize browser navigation/screenshot commands through `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs run -- <command>` so two workers never navigate the same page tab at the same time. **No browser in `non-ui` audits**: for `non-ui` audits, workers and the coordinator must **never** launch headless Chrome/Playwright, take screenshots of `review.html`, or add browser screenshot helpers to `tools/audit/` (`check-records.mjs --report` verifies `review.html` statically); workers should use a single fast `01-capture.mjs` script (calling `mcp__carapace__step` at each milestone) and copy `report.css` / `report.js` via `cp` without reading them. Each worker writes **only** inside `docs/audit/<audit>/<app>/` (`v<N>.json` and `reports/v<N>/review.html`), builds nothing, starts/stops no server, changes nothing in the plan, `.gitignore`, or toolkit, commits nothing, and returns any questions or toolkit helpers in its final message to the coordinator.
+       5. When all workers return: kill every started server by PID, add returned helpers/checks to the committed toolkit, close the fan-out entry in the register, automatically run **`reconcile`** across the apps into `docs/audit/<audit>/shared/` (`v<N>.json` + `reports/v<N>/review.html` when shared findings exist; on `v<N>` with `N > 1` and no new or reopened shared findings, leave `shared/` at its existing version), run `node <carapace-skill-path>/../app-slop-audit/assets/checker/check-records.mjs <audit> --report`, and **stop** with `nextPrompt: "/carapace decide shared"` (or the next stage from `status.mjs --json` if all apps had `0` open findings).
+

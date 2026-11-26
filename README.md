@@ -31,7 +31,7 @@ claude plugin install carapace --marketplace /path/to/carapace
 
 ## Command Surface (One Slash Command: `/carapace`)
 
-Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. In OpenCode the command is a generated `commands/carapace.md` that loads the `carapace` skill; in Codex and Cursor the same playbook is available as a skill without the slash command.
+Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. There are six documented actions: bare `/carapace`, `/carapace <prompt>`, `setup`, `audit`, `decide`, and `run`. In OpenCode the command is a generated `commands/carapace.md` that loads the `carapace` skill; in Codex and Cursor the same playbook is available as a skill without the slash command.
 
 ```text
 /carapace [<prompt or action>]
@@ -47,7 +47,22 @@ Users never need to memorize subcommands or `ui`/`non-ui` taxonomy flags. In Ope
      - **Setup & migration** (`/carapace setup`): initializes `.execution-plan-integrity.json` and `docs/execution-plan.md` in greenfield repos, or runs `execution-plan-integrity`'s read-only migration audit -> approval -> apply + consolidating any unboxed live tables into the single bounded canonical register.
      - **Audit & reconcile** (`/carapace audit [app or scope]`): auto-selects backend/data/code (`non-ui`) for API/CLI/worker repos without a UI, infers screens/UI vs backend/code from natural language, or offers plain-English options when ambiguous; supports single-app and multi-app fan-out audits with automatic `shared/` reconciliation.
      - **Decide verdicts** (`/carapace decide [app]`): walks through open findings one question at a time (`shared` first, then per-app), records `vN-verdicts.json`, updates `standards.designAuthority`, and queues accepted fix steps directly into the bounded canonical register.
-     - **Execute plan** (`/carapace run <ID>` or `/carapace <task>`): executes the current `NOW` step or a maintainer-directed `VALIDATION` `Batch:` across git worktrees using `fanout.mjs`, `carapace-*` workers, adversarial review, and semantic closure proofs.
+     - **Execute plan** (`/carapace run <ID>`): executes the current `NOW` step or a maintainer-directed `VALIDATION` `Batch:` across git worktrees using `fanout.mjs`, `carapace-*` workers, adversarial review, and semantic closure proofs. `/carapace run <ID1> <ID2> … in parallel` is the same command with a directed fan-out instruction.
+
+3. **Options, not commands**: `verify`, `plan`, `preempt`, `reconcile shared findings`, and `apply accepted findings for <target>` are numbered options emitted by status or preflight; `report` is a step inside the audit lifecycle. None are actions to memorize. Older tokens (`next`, `prompt`, `advise`, `init`, `migrate`, `verdicts`) are still understood as natural input, but the playbook documents one name per action.
+
+## Capability profiles
+
+The plan/proof lifecycle is always on. Project-type engines are opt-in through two optional fields in the target repository's `.execution-plan-integrity.json` (JSONC is supported; `$schema` gives validation):
+
+```jsonc
+"profile": "backend",              // docs-only | backend | frontend | fullstack | custom
+"capabilities": { "nonUiAudit": false }
+```
+
+`profile` supplies defaults; `capabilities` overrides them per key (`uiAudit`, `nonUiAudit`, `fanoutWorktrees`, `devServer`, `testGates`). Absent fields mean `fullstack`, so existing repositories keep their behavior. `status.mjs --json` reports effective values, their source, and drift against detected project shape; preflight stops with a `capability-disabled` conflict when a request needs a disabled engine. The checker rejects unknown profiles, unknown keys, non-boolean values, and an incomplete `custom` profile. See `skills/carapace/references/capabilities.md`.
+
+The playbook is split into `skills/carapace/SKILL.md` plus one-level-deep `references/`, and the status inspector is split into sibling ES modules behind the single `assets/status.mjs` CLI entry. Both are installed recursively.
 
 ## What ships in this plugin
 
