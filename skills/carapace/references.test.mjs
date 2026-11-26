@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import {
+  CAPABILITY_KEYS,
+  CAPABILITY_PROFILES,
+} from '../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
+const repoRoot = resolve(here, '../..')
 const skill = readFileSync(join(here, 'SKILL.md'), 'utf8')
 
 test('every workflow reference in SKILL.md resolves one level deep', () => {
@@ -17,4 +22,36 @@ test('every workflow reference in SKILL.md resolves one level deep', () => {
     assert.equal(existsSync(join(here, 'references', ref)), true, `missing references/${ref}`)
   }
   assert.ok(skill.split('\n').length < 500, 'SKILL.md must stay under 500 lines')
+})
+
+test('setup.md instructs proposing an initial profile from appProfile without silent writes (REQ-RW-12)', () => {
+  const setup = readFileSync(join(here, 'references/setup.md'), 'utf8')
+  assert.match(setup, /appProfile/)
+  assert.match(setup, /suggestedProfile/)
+  assert.match(setup, /propose/i)
+  assert.match(setup, /never silently write/i)
+  assert.match(setup, /skills\/execution-plan-integrity\/assets\/execution-plan-integrity\.schema\.json/)
+  for (const profile of [...Object.keys(CAPABILITY_PROFILES), 'custom']) {
+    assert.ok(setup.includes(`\`${profile}\``), `setup.md should name profile ${profile}`)
+  }
+})
+
+test('capabilities.md names the published JSON Schema, all keys/profiles, drift checks, and stateless git diff conflict (REQ-RW-12, REQ-RW-13)', () => {
+  const capabilities = readFileSync(join(here, 'references/capabilities.md'), 'utf8')
+  const schemaRelPath = 'skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json'
+  assert.ok(capabilities.includes(schemaRelPath), `capabilities.md must name ${schemaRelPath}`)
+  assert.equal(existsSync(join(repoRoot, schemaRelPath)), true, `missing ${schemaRelPath} on disk`)
+
+  for (const key of CAPABILITY_KEYS) {
+    assert.ok(capabilities.includes(`\`${key}\``), `capabilities.md must document capability ${key}`)
+  }
+  for (const profile of [...Object.keys(CAPABILITY_PROFILES), 'custom']) {
+    assert.ok(capabilities.includes(`\`${profile}\``), `capabilities.md must document profile ${profile}`)
+  }
+  assert.match(capabilities, /drift/)
+  assert.match(capabilities, /all five capabilities/i)
+  assert.match(capabilities, /uncommittedChange/)
+  assert.match(capabilities, /uncommitted-capability-change/)
+  assert.match(capabilities, /stateless `git diff`/i)
+  assert.match(capabilities, /no persisted sidecar state file/i)
 })

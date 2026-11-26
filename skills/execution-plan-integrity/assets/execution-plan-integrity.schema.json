@@ -1,0 +1,123 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://carapace.local/schemas/execution-plan-integrity.schema.json",
+  "title": "Execution Plan Integrity Configuration",
+  "description": "Schema for .execution-plan-integrity.json (schema version 2) used by execution-plan-integrity and Carapace.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "canonical",
+    "completionProofs",
+    "requiredGlobs",
+    "roles"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1
+    },
+    "schema": {
+      "type": "integer",
+      "const": 2
+    },
+    "canonical": {
+      "type": "string",
+      "const": "docs/execution-plan.md"
+    },
+    "completionProofs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["directory"],
+      "properties": {
+        "directory": {
+          "$ref": "#/$defs/repoRelativePath"
+        }
+      }
+    },
+    "requiredGlobs": {
+      "$ref": "#/$defs/nonEmptyStringList"
+    },
+    "roles": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "evidence": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "validation": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "design": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        },
+        "archive": {
+          "$ref": "#/$defs/nonEmptyStringList"
+        }
+      }
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["docs-only", "backend", "frontend", "fullstack", "custom"],
+      "default": "fullstack"
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uiAudit": {
+          "type": "boolean"
+        },
+        "nonUiAudit": {
+          "type": "boolean"
+        },
+        "fanoutWorktrees": {
+          "type": "boolean"
+        },
+        "devServer": {
+          "type": "boolean"
+        },
+        "testGates": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "if": {
+    "required": ["profile"],
+    "properties": {
+      "profile": {
+        "const": "custom"
+      }
+    }
+  },
+  "then": {
+    "required": ["capabilities"],
+    "properties": {
+      "capabilities": {
+        "required": [
+          "uiAudit",
+          "nonUiAudit",
+          "fanoutWorktrees",
+          "devServer",
+          "testGates"
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyStringList": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "repoRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$"
+    }
+  }
+}

@@ -11,6 +11,7 @@ export const ARTIFACT_ENTRIES = Object.freeze([
   'assets/checker/completion-proof.mjs',
   'assets/checker/execution-register.mjs',
   'assets/checker/execution-register.test.mjs',
+  'assets/execution-plan-integrity.schema.json',
 ])
 
 export const REQUIRED_ARTIFACT_FILES = ARTIFACT_ENTRIES
@@ -26,6 +27,7 @@ export const ARTIFACT_SHA256 = Object.freeze({
   'assets/checker/completion-proof.mjs': 'd0d6e6b2001390d5b83ba34fbe94843a7bacbe43be8b6b8060f56a47c76ab4b9',
   'assets/checker/execution-register.mjs': 'd02240a65314dda97f57034c8f5e3ac63fc31923b9e5f14ad33d3cc8c860c659',
   'assets/checker/execution-register.test.mjs': '6910452a057b625166a06dc711042549d41ddb06a955e802166e53cd22b4b729',
+  'assets/execution-plan-integrity.schema.json': '0eaab10eb08546fa72614ce740baf8df624224eeb18093874c5eb713a567989e',
 })
 
 export const SKILL_VERIFICATION_PROOFS = Object.freeze([

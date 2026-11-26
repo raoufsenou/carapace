@@ -65,7 +65,7 @@ export function commandPlan(args) {
   if (!yolo) plan.yolo = false
   return plan
 }
-export function resolveCapabilities(config, appProfile = {}) {
+export function resolveCapabilities(config, appProfile = {}, gitState = {}) {
   const profile = config?.profile === 'custom' ? 'custom' : (config?.profile ?? 'fullstack')
   const defaults = profile === 'custom' ? {} : (CAPABILITY_PROFILES[profile] ?? CAPABILITY_PROFILES.fullstack)
   const explicit =
@@ -81,6 +81,47 @@ export function resolveCapabilities(config, appProfile = {}) {
   const drift = []
   if (values.uiAudit.enabled && !appProfile.hasUi) drift.push('uiAudit is enabled but no UI files were detected')
   if (!values.uiAudit.enabled && appProfile.hasUi) drift.push('UI files were detected but uiAudit is disabled')
+  if (typeof appProfile.hasNonUiCode === 'boolean') {
+    if (values.nonUiAudit.enabled && appProfile.hasNonUiCode === false) {
+      drift.push('nonUiAudit is enabled but no non-UI code was detected')
+    }
+    if (!values.nonUiAudit.enabled && appProfile.hasNonUiCode === true) {
+      drift.push('non-UI code was detected but nonUiAudit is disabled')
+    }
+  }
+  const isGitRepo =
+    typeof gitState?.isGitRepo === 'boolean'
+      ? gitState.isGitRepo
+      : typeof appProfile?.isGitRepo === 'boolean'
+        ? appProfile.isGitRepo
+        : undefined
+  const hasLinkedWorktrees = Array.isArray(gitState?.worktrees)
+    ? gitState.worktrees.length > 1
+    : typeof appProfile?.hasWorktrees === 'boolean'
+      ? appProfile.hasWorktrees
+      : undefined
+  if (values.fanoutWorktrees.enabled && isGitRepo === false) {
+    drift.push('fanoutWorktrees is enabled but repository is not a git repo')
+  }
+  if (!values.fanoutWorktrees.enabled && hasLinkedWorktrees === true) {
+    drift.push('linked git worktrees were detected but fanoutWorktrees is disabled')
+  }
+  if (typeof appProfile.hasDevServer === 'boolean') {
+    if (values.devServer.enabled && appProfile.hasDevServer === false) {
+      drift.push('devServer is enabled but no dev server configuration was detected')
+    }
+    if (!values.devServer.enabled && appProfile.hasDevServer === true) {
+      drift.push('dev server configuration was detected but devServer is disabled')
+    }
+  }
+  if (typeof appProfile.hasTests === 'boolean') {
+    if (values.testGates.enabled && appProfile.hasTests === false) {
+      drift.push('testGates is enabled but no test or build gates were detected')
+    }
+    if (!values.testGates.enabled && appProfile.hasTests === true) {
+      drift.push('test or build gates were detected but testGates is disabled')
+    }
+  }
   return { profile, profileSource: config?.profile ? 'config' : 'default', values, drift }
 }
 

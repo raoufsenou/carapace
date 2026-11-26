@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
@@ -12,11 +12,14 @@ import {
   parseRegisterStatus,
   readCarapaceStatus,
 } from './status.mjs'
+import { detectAppProfile } from './app-profile.mjs'
+import { resolveCapabilities } from './config.mjs'
 import { analyzeFanoutReadiness } from './fanout.mjs'
 import { evaluatePromptConflicts, optionCapability } from './prompt.mjs'
 import { readRequirementsBrief, targetTaskId, targetTaskIds } from './requirements.mjs'
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'status.mjs')
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const roots = []
 
 afterEach(() => {
@@ -1706,4 +1709,399 @@ test('core retains pre-canonical capabilities, syncs promoted Recommended labels
   ])
   assert.equal(uiIdOnly.unappliedAccepted.find((e) => e.audit === 'ui' && e.target === 'web')?.trackedInRegister, true)
   assert.equal(uiIdOnly.unappliedAccepted.find((e) => e.audit === 'non-ui' && e.target === 'web')?.trackedInRegister, false)
+})
+
+test('resolveCapabilities reports drift across all five capabilities in both directions (REQ-RW-12)', () => {
+  const allOff = {
+    uiAudit: false,
+    nonUiAudit: false,
+    fanoutWorktrees: false,
+    devServer: false,
+    testGates: false,
+  }
+  const allOn = {
+    uiAudit: true,
+    nonUiAudit: true,
+    fanoutWorktrees: true,
+    devServer: true,
+    testGates: true,
+  }
+
+  // Enabled when signals are absent
+  const enabledAbsent = resolveCapabilities(
+    { profile: 'custom', capabilities: allOn },
+    { hasUi: false, hasNonUiCode: false, hasDevServer: false, hasTests: false },
+    { isGitRepo: false, worktrees: [] },
+  )
+  assert.deepEqual(enabledAbsent.drift, [
+    'uiAudit is enabled but no UI files were detected',
+    'nonUiAudit is enabled but no non-UI code was detected',
+    'fanoutWorktrees is enabled but repository is not a git repo',
+    'devServer is enabled but no dev server configuration was detected',
+    'testGates is enabled but no test or build gates were detected',
+  ])
+
+  // Disabled when signals are present (including linked worktrees)
+  const disabledPresent = resolveCapabilities(
+    { profile: 'custom', capabilities: allOff },
+    { hasUi: true, hasNonUiCode: true, hasDevServer: true, hasTests: true },
+    {
+      isGitRepo: true,
+      worktrees: [
+        { path: '/repo', branch: 'main' },
+        { path: '/repo/.worktree/a', branch: 'feat-a' },
+      ],
+    },
+  )
+  assert.deepEqual(disabledPresent.drift, [
+    'UI files were detected but uiAudit is disabled',
+    'non-UI code was detected but nonUiAudit is disabled',
+    'linked git worktrees were detected but fanoutWorktrees is disabled',
+    'dev server configuration was detected but devServer is disabled',
+    'test or build gates were detected but testGates is disabled',
+  ])
+
+  // docs-only in a single-worktree git repo emits zero drift for fanoutWorktrees
+  const docsInGit = resolveCapabilities(
+    { profile: 'docs-only' },
+    { hasUi: false, hasNonUiCode: false, hasDevServer: false, hasTests: false },
+    { isGitRepo: true, worktrees: [{ path: '/repo', branch: 'main' }] },
+  )
+  assert.deepEqual(docsInGit.drift, [])
+
+  // Fallback to appProfile.isGitRepo / appProfile.hasWorktrees when gitState is omitted
+  const fallbackNoGit = resolveCapabilities(
+    { profile: 'custom', capabilities: { ...allOff, fanoutWorktrees: true } },
+    { hasUi: false, hasNonUiCode: false, hasDevServer: false, hasTests: false, isGitRepo: false },
+  )
+  assert.deepEqual(fallbackNoGit.drift, ['fanoutWorktrees is enabled but repository is not a git repo'])
+
+  const fallbackLinked = resolveCapabilities(
+    { profile: 'docs-only' },
+    { hasUi: false, hasNonUiCode: false, hasDevServer: false, hasTests: false, isGitRepo: true, hasWorktrees: true },
+  )
+  assert.deepEqual(fallbackLinked.drift, ['linked git worktrees were detected but fanoutWorktrees is disabled'])
+})
+
+test('detectAppProfile and resolveCapabilities classify docs-only, backend, frontend, fullstack, and carapace root with 0 drift (REQ-RW-12)', () => {
+  const singleGit = { isGitRepo: true, worktrees: [{ path: '/repo', branch: 'main' }] }
+
+  // 1. docs-only fixture
+  const docsRoot = tempRepo()
+  write(docsRoot, 'README.md', '# Docs repo\n')
+  write(docsRoot, 'docs/execution-plan.md', '<!-- execution-role: canonical -->\n')
+  const docsProfile = detectAppProfile(docsRoot)
+  assert.deepEqual(docsProfile, {
+    hasUi: false,
+    hasNonUiCode: false,
+    hasDevServer: false,
+    hasTests: false,
+    suggestedProfile: 'docs-only',
+  })
+  assert.deepEqual(resolveCapabilities({ profile: 'docs-only' }, docsProfile, singleGit).drift, [])
+
+  // 2. backend fixture (headless "dev" script must NOT set hasDevServer: true)
+  const backendRoot = tempRepo()
+  write(
+    backendRoot,
+    'package.json',
+    JSON.stringify({
+      name: 'api-only',
+      scripts: { dev: 'node src/server.mjs', test: 'node --test' },
+    }),
+  )
+  write(backendRoot, 'src/server.mjs', 'export const start = () => {}\n')
+  const backendProfile = detectAppProfile(backendRoot)
+  assert.deepEqual(backendProfile, {
+    hasUi: false,
+    hasNonUiCode: true,
+    hasDevServer: false,
+    hasTests: true,
+    suggestedProfile: 'backend',
+  })
+  assert.deepEqual(resolveCapabilities({ profile: 'backend' }, backendProfile, singleGit).drift, [])
+
+  // Placeholder npm test script alone does not mark hasTests: true
+  const placeholderRoot = tempRepo()
+  write(
+    placeholderRoot,
+    'package.json',
+    JSON.stringify({
+      name: 'no-real-tests',
+      scripts: { test: 'echo "Error: no test specified" && exit 1' },
+    }),
+  )
+  write(placeholderRoot, 'src/index.mjs', 'export const ok = true\n')
+  const placeholderProfile = detectAppProfile(placeholderRoot)
+  assert.equal(placeholderProfile.hasNonUiCode, true)
+  assert.equal(placeholderProfile.hasDevServer, false)
+  assert.equal(placeholderProfile.hasTests, false)
+  assert.equal(placeholderProfile.suggestedProfile, 'backend')
+
+  // 3. frontend SPA fixture (0 drift on frontend profile)
+  const frontendRoot = tempRepo()
+  write(
+    frontendRoot,
+    'package.json',
+    JSON.stringify({
+      name: 'web-spa',
+      dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' },
+      devDependencies: { vite: '^6.0.0' },
+      scripts: { dev: 'vite', build: 'vite build', test: 'vitest run' },
+    }),
+  )
+  write(frontendRoot, 'vite.config.ts', 'export default {}\n')
+  write(frontendRoot, 'index.html', '<div id="root"></div>\n')
+  write(frontendRoot, 'src/App.tsx', 'export function App() { return null }\n')
+  const frontendProfile = detectAppProfile(frontendRoot)
+  assert.deepEqual(frontendProfile, {
+    hasUi: true,
+    hasNonUiCode: false,
+    hasDevServer: true,
+    hasTests: true,
+    suggestedProfile: 'frontend',
+  })
+  assert.deepEqual(resolveCapabilities({ profile: 'frontend' }, frontendProfile, singleGit).drift, [])
+
+  // 4. fullstack monorepo fixture (0 drift on fullstack profile)
+  const fullstackRoot = tempRepo()
+  write(
+    fullstackRoot,
+    'apps/web/package.json',
+    JSON.stringify({
+      name: 'web',
+      dependencies: { react: '^19.0.0' },
+      devDependencies: { vite: '^6.0.0' },
+      scripts: { dev: 'vite', test: 'vitest run' },
+    }),
+  )
+  write(fullstackRoot, 'apps/web/src/App.tsx', 'export const App = () => null\n')
+  write(
+    fullstackRoot,
+    'apps/api/package.json',
+    JSON.stringify({
+      name: 'api',
+      dependencies: { express: '^5.0.0' },
+      scripts: { test: 'node --test' },
+    }),
+  )
+  write(fullstackRoot, 'apps/api/src/index.mjs', 'export const app = {}\n')
+  const fullstackProfile = detectAppProfile(fullstackRoot)
+  assert.deepEqual(fullstackProfile, {
+    hasUi: true,
+    hasNonUiCode: true,
+    hasDevServer: true,
+    hasTests: true,
+    suggestedProfile: 'fullstack',
+  })
+  assert.deepEqual(resolveCapabilities({ profile: 'fullstack' }, fullstackProfile, singleGit).drift, [])
+
+  // 5. Carapace repository itself detects backend with 0 drift when configured as backend
+  const carapaceProfile = detectAppProfile(REPO_ROOT)
+  assert.deepEqual(carapaceProfile, {
+    hasUi: false,
+    hasNonUiCode: true,
+    hasDevServer: false,
+    hasTests: true,
+    suggestedProfile: 'backend',
+  })
+  assert.deepEqual(resolveCapabilities({ profile: 'backend' }, carapaceProfile, singleGit).drift, [])
+
+  // 6. readCarapaceStatus wires gitState into fanoutWorktrees drift without leaking git fields into appProfile
+  const nonGitBackendStatus = readCarapaceStatus({ root: backendRoot })
+  assert.deepEqual(nonGitBackendStatus.appProfile, backendProfile)
+  assert.ok(
+    nonGitBackendStatus.capabilities.drift.includes('fanoutWorktrees is enabled but repository is not a git repo'),
+  )
+})
+
+test('stateless git diff detects uncommitted capability changes while NOW is active without sidecar files (REQ-RW-13)', () => {
+  const root = tempRepo()
+  const git = (...args) => {
+    const run = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+    assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`)
+    return run.stdout
+  }
+  const writePlan = (pointer) => {
+    const idleLines =
+      pointer === 'IDLE'
+        ? ['`IDLE REASON`: Waiting on `DEC-1`.', '`RESUME WHEN`: `DEC-1` resolves.']
+        : []
+    const rows =
+      pointer === 'TASK-1'
+        ? ['| 1 | `TASK-1` | `IMPLEMENTATION` | `NOW` | Implement feature. | Authority |']
+        : ['| 1 | `TASK-1` | `IMPLEMENTATION` | `DONE` | Completed 2026-11-26; docs/execution-proofs/TASK-1.json. | Proof |']
+    const unordered =
+      pointer === 'IDLE'
+        ? [
+            '',
+            '| ID | Kind | State | Work | Trigger or owner |',
+            '| --- | --- | --- | --- | --- |',
+            '| `DEC-1` | `DECISION` | `DEFERRED` | Pending decision. | Maintainer. |',
+          ]
+        : []
+    write(
+      root,
+      'docs/execution-plan.md',
+      [
+        '<!-- execution-role: canonical -->',
+        '<!-- execution-register:start -->',
+        `\`NOW\`: \`${pointer}\``,
+        ...idleLines,
+        '',
+        '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+        '| --- | --- | --- | --- | --- | --- |',
+        ...rows,
+        ...unordered,
+        '<!-- execution-register:end -->',
+      ].join('\n'),
+    )
+  }
+  const configText = (extra, { comment = '', requiredGlobs = ['docs/**/*.md'] } = {}) =>
+    [
+      comment,
+      JSON.stringify(
+        {
+          schema: 2,
+          canonical: 'docs/execution-plan.md',
+          completionProofs: { directory: 'docs/execution-proofs' },
+          requiredGlobs,
+          roles: { design: ['docs/*.md'] },
+          ...extra,
+        },
+        null,
+        2,
+      ),
+    ]
+      .filter(Boolean)
+      .join('\n')
+
+  git('init', '-b', 'main')
+  git('config', 'user.name', 'Carapace Test')
+  git('config', 'user.email', 'test@carapace.local')
+  git('config', 'commit.gpgsign', 'false')
+  git('config', 'core.hooksPath', '/dev/null')
+
+  write(root, '.execution-plan-integrity.json', configText({ profile: 'backend' }))
+  writePlan('TASK-1')
+  write(
+    root,
+    'docs/task-authority.md',
+    [
+      '<!-- execution-role: design -->',
+      'Locked 2026-11-26.',
+      'This is the authority for `TASK-1`.',
+      '### REQ-1 — Behavior holds',
+    ].join('\n'),
+  )
+  git('add', '.')
+  git('commit', '-m', 'initial committed state')
+
+  // 1. Clean committed state -> no uncommitted capability change, 0 conflicts.
+  const clean = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.deepEqual(clean.capabilities.uncommittedChange, {
+    changed: false,
+    configPath: '.execution-plan-integrity.json',
+    headProfile: null,
+    currentProfile: 'backend',
+    changedFields: [],
+  })
+  assert.deepEqual(clean.preflight.conflicts, [])
+
+  // 2. Editing only a JSONC comment and requiredGlobs -> no capability change conflict.
+  write(
+    root,
+    '.execution-plan-integrity.json',
+    configText({ profile: 'backend' }, { comment: '// non-capability comment', requiredGlobs: ['docs/**/*plan*.md'] }),
+  )
+  const nonCapEdit = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(nonCapEdit.capabilities.uncommittedChange.changed, false)
+  assert.deepEqual(nonCapEdit.capabilities.uncommittedChange.changedFields, [])
+  assert.deepEqual(nonCapEdit.preflight.conflicts, [])
+
+  // 3. Modifying profile (unstaged) while NOW is active -> conflict on run & audit, verify stays clean, 0 sidecar files.
+  write(root, '.execution-plan-integrity.json', configText({ profile: 'docs-only' }))
+  const unstagedRun = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.deepEqual(unstagedRun.capabilities.uncommittedChange, {
+    changed: true,
+    configPath: '.execution-plan-integrity.json',
+    headProfile: 'backend',
+    currentProfile: 'docs-only',
+    changedFields: ['profile'],
+  })
+  const profileConflict = unstagedRun.preflight.conflicts.find((c) => c.kind === 'uncommitted-capability-change')
+  assert.ok(profileConflict, 'unstaged profile change must raise uncommitted-capability-change on run TASK-1')
+  assert.match(profileConflict.message, /profile/)
+  assert.equal(profileConflict.options[0].command, '/carapace verify')
+  assert.equal(profileConflict.options[0].recommended, true)
+
+  const unstagedAudit = readCarapaceStatus({ root, prompt: 'audit', yolo: false })
+  assert.ok(unstagedAudit.preflight.conflicts.some((c) => c.kind === 'uncommitted-capability-change'))
+
+  const unstagedYolo = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: true })
+  assert.ok(unstagedYolo.preflight.conflicts.some((c) => c.kind === 'uncommitted-capability-change'))
+
+  for (const readOnly of ['verify', 'status', 'check']) {
+    const inspect = readCarapaceStatus({ root, prompt: readOnly, yolo: false })
+    assert.deepEqual(inspect.preflight.conflicts, [], `${readOnly} must stay conflict-free`)
+  }
+  const porcelain = git('status', '--porcelain')
+    .split(/\r?\n/)
+    .filter(Boolean)
+  assert.deepEqual(porcelain, [' M .execution-plan-integrity.json'])
+
+  // 4. Staging without committing still fires the conflict.
+  git('add', '.execution-plan-integrity.json')
+  const stagedRun = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(stagedRun.capabilities.uncommittedChange.changed, true)
+  assert.ok(stagedRun.preflight.conflicts.some((c) => c.kind === 'uncommitted-capability-change'))
+
+  // 5. Committing the change clears the conflict immediately.
+  git('commit', '-m', 'switch profile to docs-only')
+  const committedRun = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(committedRun.capabilities.uncommittedChange.changed, false)
+  assert.deepEqual(committedRun.preflight.conflicts, [])
+
+  // 6. Modifying capabilities (toggling uiAudit) fires naming capabilities.uiAudit; reverting or committing clears it.
+  write(root, '.execution-plan-integrity.json', configText({ profile: 'docs-only', capabilities: { uiAudit: true } }))
+  const capEdit = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(capEdit.capabilities.uncommittedChange.changed, true)
+  assert.deepEqual(capEdit.capabilities.uncommittedChange.changedFields, ['capabilities.uiAudit'])
+  const capConflict = capEdit.preflight.conflicts.find((c) => c.kind === 'uncommitted-capability-change')
+  assert.ok(capConflict)
+  assert.match(capConflict.message, /capabilities\.uiAudit/)
+
+  // Reverting clears it without committing.
+  write(root, '.execution-plan-integrity.json', configText({ profile: 'docs-only' }))
+  const reverted = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(reverted.capabilities.uncommittedChange.changed, false)
+  assert.deepEqual(reverted.preflight.conflicts, [])
+
+  // Re-applying and committing also clears it.
+  write(root, '.execution-plan-integrity.json', configText({ profile: 'docs-only', capabilities: { uiAudit: true } }))
+  git('add', '.execution-plan-integrity.json')
+  git('commit', '-m', 'enable uiAudit override')
+  const committedCap = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(committedCap.capabilities.uncommittedChange.changed, false)
+  assert.deepEqual(committedCap.preflight.conflicts, [])
+
+  // Malformed non-object capabilities edit while NOW is active still triggers the conflict.
+  write(root, '.execution-plan-integrity.json', configText({ profile: 'docs-only', capabilities: [] }))
+  const malformedCap = readCarapaceStatus({ root, prompt: 'run TASK-1', yolo: false })
+  assert.equal(malformedCap.capabilities.uncommittedChange.changed, true)
+  assert.ok(malformedCap.capabilities.uncommittedChange.changedFields.includes('capabilities'))
+  assert.ok(malformedCap.preflight.conflicts.some((c) => c.kind === 'uncommitted-capability-change'))
+
+  // 7. When NOW is IDLE or NONE, uncommitted profile/capabilities changes do not trigger uncommitted-capability-change.
+  for (const pointer of ['IDLE', 'NONE']) {
+    writePlan(pointer)
+    write(root, '.execution-plan-integrity.json', configText({ profile: 'backend', capabilities: { uiAudit: false } }))
+    const idleStatus = readCarapaceStatus({ root, prompt: 'audit', yolo: false })
+    assert.equal(idleStatus.capabilities.uncommittedChange.changed, true)
+    assert.equal(
+      idleStatus.preflight.conflicts.some((c) => c.kind === 'uncommitted-capability-change'),
+      false,
+      `uncommitted-capability-change must not fire when NOW is ${pointer}`,
+    )
+  }
 })

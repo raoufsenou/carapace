@@ -1,0 +1,239 @@
+{
+  "schema": 1,
+  "taskId": "RW-SCHEMA-CAP",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-27",
+  "requirements": [
+    {
+      "id": "REQ-RW-12",
+      "statement": "Published config JSON Schema, broader capability drift detection, and opt-in setup proposal",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-12"
+      },
+      "evidence": [
+        {
+          "path": "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+          "symbol": "\"$schema\": \"https://json-schema.org/draft/2020-12/schema\""
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+          "symbol": "\"repoRelativePath\":"
+        },
+        {
+          "path": "skills/execution-plan-integrity/scripts/artifact.mjs",
+          "symbol": "'assets/execution-plan-integrity.schema.json': '0eaab10eb08546fa72614ce740baf8df624224eeb18093874c5eb713a567989e'"
+        },
+        {
+          "path": "skills/execution-plan-integrity/tests/config.test.mjs",
+          "symbol": "published JSON Schema stays in parity with check-execution-plan constants and validates root config (REQ-RW-12)"
+        },
+        {
+          "path": "skills/execution-plan-integrity/tests/config.test.mjs",
+          "symbol": "JSON Schema and readExecutionConfig agree on valid and invalid configs (REQ-RW-12)"
+        },
+        {
+          "path": "skills/carapace/assets/app-profile.mjs",
+          "symbol": "return { hasUi, hasNonUiCode, hasDevServer, hasTests, suggestedProfile }"
+        },
+        {
+          "path": "skills/carapace/assets/config.mjs",
+          "symbol": "export function resolveCapabilities(config, appProfile = {}, gitState = {}) {"
+        },
+        {
+          "path": "skills/carapace/assets/config.mjs",
+          "symbol": "drift.push('fanoutWorktrees is enabled but repository is not a git repo')"
+        },
+        {
+          "path": "skills/carapace/assets/config.mjs",
+          "symbol": "drift.push('devServer is enabled but no dev server configuration was detected')"
+        },
+        {
+          "path": "skills/carapace/assets/config.mjs",
+          "symbol": "drift.push('testGates is enabled but no test or build gates were detected')"
+        },
+        {
+          "path": "skills/carapace/references/setup.md",
+          "symbol": "**Never silently write** `profile` or `capabilities` into `.execution-plan-integrity.json`"
+        },
+        {
+          "path": "skills/carapace/references/capabilities.md",
+          "symbol": "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json"
+        },
+        {
+          "path": "skills/carapace/references.test.mjs",
+          "symbol": "setup.md instructs proposing an initial profile from appProfile without silent writes (REQ-RW-12)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "resolveCapabilities reports drift across all five capabilities in both directions (REQ-RW-12)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "detectAppProfile and resolveCapabilities classify docs-only, backend, frontend, fullstack, and carapace root with 0 drift (REQ-RW-12)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/execution-plan-integrity/tests/config.test.mjs skills/execution-plan-integrity/tests/skill.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node skills/execution-plan-integrity/scripts/validate.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/references.test.mjs skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-13",
+      "statement": "Stateless active-run capability-change conflict detection",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-13"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/git.mjs",
+          "symbol": "function detectUncommittedCapabilityChange(root, relConfig, currentConfig, gitState) {"
+        },
+        {
+          "path": "skills/carapace/assets/git.mjs",
+          "symbol": "spawnSync('git', ['diff', '--quiet', 'HEAD', '--', relConfig]"
+        },
+        {
+          "path": "skills/carapace/assets/git.mjs",
+          "symbol": "spawnSync('git', ['show', `HEAD:${relConfig}`]"
+        },
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "capabilities.uncommittedChange = detectUncommittedCapabilityChange(root, relConfig, config, gitState)"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "if (activeNow && status.capabilities?.uncommittedChange?.changed === true) {"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "kind: 'uncommitted-capability-change'"
+        },
+        {
+          "path": "skills/carapace/references/capabilities.md",
+          "symbol": "Active-run uncommitted capability change (`uncommitted-capability-change`)"
+        },
+        {
+          "path": "skills/carapace/references.test.mjs",
+          "symbol": "capabilities.md names the published JSON Schema, all keys/profiles, drift checks, and stateless git diff conflict (REQ-RW-12, REQ-RW-13)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "stateless git diff detects uncommitted capability changes while NOW is active without sidecar files (REQ-RW-13)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/references.test.mjs skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+    "skills/execution-plan-integrity/scripts/artifact.mjs",
+    "skills/execution-plan-integrity/tests/config.test.mjs",
+    "skills/carapace/assets/app-profile.mjs",
+    "skills/carapace/assets/config.mjs",
+    "skills/carapace/assets/git.mjs",
+    "skills/carapace/assets/core.mjs",
+    "skills/carapace/assets/prompt.mjs",
+    "skills/carapace/references/setup.md",
+    "skills/carapace/references/capabilities.md",
+    "skills/carapace/references.test.mjs",
+    "skills/carapace/assets/status.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node skills/execution-plan-integrity/scripts/validate.mjs and standalone skill install",
+      "implementation": "skills/execution-plan-integrity/scripts/artifact.mjs#'assets/execution-plan-integrity.schema.json'",
+      "consumer": "skills/execution-plan-integrity/scripts/validate.mjs#for (const file of REQUIRED_ARTIFACT_FILES)"
+    },
+    {
+      "entryPoint": "node skills/carapace/assets/status.mjs --root <repo> --json",
+      "implementation": "skills/carapace/assets/app-profile.mjs#function detectAppProfile(root) {",
+      "consumer": "skills/carapace/assets/core.mjs#const detectedAppProfile = detectAppProfile(root)"
+    },
+    {
+      "entryPoint": "node skills/carapace/assets/status.mjs --root <repo> --json",
+      "implementation": "skills/carapace/assets/config.mjs#export function resolveCapabilities(config, appProfile = {}, gitState = {}) {",
+      "consumer": "skills/carapace/assets/core.mjs#const capabilities = resolveCapabilities(config, appProfile)"
+    },
+    {
+      "entryPoint": "node skills/carapace/assets/status.mjs --root <repo> --json --prompt \"<text>\"",
+      "implementation": "skills/carapace/assets/git.mjs#function detectUncommittedCapabilityChange(root, relConfig, currentConfig, gitState) {",
+      "consumer": "skills/carapace/assets/core.mjs#capabilities.uncommittedChange = detectUncommittedCapabilityChange(root, relConfig, config, gitState)"
+    },
+    {
+      "entryPoint": "node skills/carapace/assets/status.mjs --root <repo> --json --prompt \"<text>\"",
+      "implementation": "skills/carapace/assets/prompt.mjs#if (activeNow && status.capabilities?.uncommittedChange?.changed === true) {",
+      "consumer": "skills/carapace/assets/core.mjs#const preflight = evaluatePromptConflicts(withStage, prompt)"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Invalid .execution-plan-integrity.json variants (wrong schema version, non-canonical path, absolute or parent-escaping completionProofs.directory, empty requiredGlobs/role lists, unknown roles/profiles/capability keys, non-boolean capability values, custom profile missing any of the five keys, unknown top-level typo properties, and Windows drive/backslash paths) are rejected by both the published JSON Schema and readExecutionConfig where applicable.",
+      "kind": "test",
+      "evidence": "skills/execution-plan-integrity/tests/config.test.mjs cross-checks every valid and invalid case against both validateSchema and readExecutionConfig and validates Carapace's root .execution-plan-integrity.json.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Capability drift fires in both directions across all five capabilities (uiAudit, nonUiAudit, fanoutWorktrees, devServer, testGates), does not produce false positives for headless backend dev scripts, npm placeholder test scripts, single-worktree docs-only git repos, or pure frontend SPAs, and reports 0 drift on matching docs-only, backend, frontend, fullstack, and Carapace root profiles.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs tests resolveCapabilities across all five capabilities in both directions plus detectAppProfile end-to-end fixtures for docs-only, backend, placeholder-test backend, frontend SPA, fullstack monorepo, and the Carapace repository root.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Uncommitted unstaged, staged, or malformed profile/capabilities edits in .execution-plan-integrity.json raise uncommitted-capability-change while NOW is active (without creating any sidecar files), ignore comment-only or requiredGlobs-only edits, allow read-only verify/status/check prompts, clear immediately upon commit or revert, and do not fire when NOW is IDLE or NONE.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs initializes a temporary git repository and verifies clean state, non-capability edits, unstaged/staged/malformed capability edits, git status --porcelain showing only .execution-plan-integrity.json, read-only verify/status/check bypass, revert/commit clearing, and IDLE/NONE suppression.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "DELIVERED"
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Dogfooding Carapace's own root .execution-plan-integrity.json profile and end-to-end fixture validation (REQ-RW-14) remain queued in RW-DOGFOOD-CLOSE.",
+    "Live scripts/install.mjs --replace against real maintainer harness homes remains manual per D-REWORK-HARDENING."
+  ],
+  "closedRow": "| 12 | `RW-SCHEMA-CAP` | `IMPLEMENTATION` | `NOW` | Publish the `.execution-plan-integrity.json` JSON Schema matching `check-execution-plan.mjs`, expand `config.mjs` drift checks (`devServer`, `nonUiAudit`, `fanoutWorktrees`, `testGates`), update `references/setup.md` to propose an initial `profile` without silent writes, and add stateless `git diff` active-run capability-change conflict detection in `status.mjs`/`prompt.mjs` (plus refresh `ARTIFACT_SHA256` if packaged files change). Closes when schema, drift, and conflict tests pass. | `D-REWORK-HARDENING` REQ-RW-12, REQ-RW-13. |",
+  "notes": [
+    "All 10 pre-existing ARTIFACT_SHA256 entries in skills/execution-plan-integrity/scripts/artifact.mjs remain unchanged so docs/execution-proofs/RW-VERIFY-FLOOR.json stays intact while adding assets/execution-plan-integrity.schema.json.",
+    "skills/carapace/assets/core.mjs preserves the resolveCapabilities(config, appProfile) call shape cited by docs/execution-proofs/RW-PREFLIGHT-CORE.json while passing gitState signals into drift checks and keeping status.appProfile limited to its five profile keys."
+  ]
+}

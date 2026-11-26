@@ -6,7 +6,7 @@ Carapace's plan/proof lifecycle is always on. The configured switches only decid
 
 ## Where the config lives
 
-Add two optional fields to the project's existing `.execution-plan-integrity.json` (the file named by the checker's `DEFAULT_CONFIG`). It is JSONC: comments are allowed, and the published `$schema` gives editor validation. No second config format and no separate config file.
+Add two optional fields to the project's existing `.execution-plan-integrity.json` (the file named by the checker's `DEFAULT_CONFIG`). It is JSONC: comments are allowed, and the published JSON Schema at `skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json` (usable via `$schema`) gives editor validation matching `check-execution-plan.mjs`. No second config format and no separate config file.
 
 ```jsonc
 {
@@ -52,15 +52,19 @@ An app's `docs/audit/<audit>/<app>/config.json` remains the authority for *how* 
 
 - `profile` — effective profile, and whether it came from config or the default.
 - `values` — each capability with `enabled` and `source` (`profile`, `explicit`, or `default`).
-- `drift` — warnings where a configured capability disagrees with detected project shape (for example `uiAudit` on while no UI files are found). Detection supplies defaults and warnings; an explicit config value always wins.
+- `drift` — warnings across all five capabilities (`uiAudit`, `nonUiAudit`, `fanoutWorktrees`, `devServer`, `testGates`) where a configured capability disagrees with detected project shape or git state (for example `uiAudit` on while no UI files are found, `devServer` on without a rendered-app dev server, `nonUiAudit` disagreeing with non-UI code, `fanoutWorktrees` enabled outside git or disabled with linked worktrees, or `testGates` disagreeing with detected test/build gates). Detection supplies proposals and warnings; an explicit config value always wins.
+- `uncommittedChange` — stateless `git diff` check against `HEAD` for `.execution-plan-integrity.json` reporting `{ changed, configPath, headProfile, currentProfile, changedFields }` without creating any persisted sidecar state file.
 
 ## Preflight behavior
 
-Before any mutation, `status.mjs --json --prompt "<text>"` checks whether the request needs a disabled capability. If it does, preflight returns a `capability-disabled` conflict naming the exact key and config path to change, plus a read-only `verify` option and an explicit "proceed without that engine" option. The orchestrator stops, presents those options, and never silently enables a capability or edits the config.
+Before any mutation, `status.mjs --json --prompt "<text>"` checks two capability invariants:
+
+1. **Disabled capability (`capability-disabled`)**: whether the request needs a disabled capability. If it does, preflight returns a `capability-disabled` conflict naming the exact key and config path to change, plus a read-only `verify` option and an explicit "proceed without that engine" option. The orchestrator stops, presents those options, and never silently enables a capability or edits the config.
+2. **Active-run uncommitted capability change (`uncommitted-capability-change`)**: while `NOW` is active (not `IDLE`, `NONE`, or `SETUP`), if `capabilities.uncommittedChange.changed` is `true` — detected purely via stateless `git diff` against `HEAD` with no persisted sidecar state file — preflight raises an `uncommitted-capability-change` conflict naming the changed `profile`/`capabilities.*` fields so the maintainer commits or reverts the config change in git before continuing. Read-only `verify`/`status`/`check` prompts remain allowed.
 
 ## Rules
 
 - Capability changes are maintainer decisions. Change the committed config, then re-run `/carapace` before continuing.
-- A capability change during an active run is a conflict, like an interrupted step or active worktree.
+- A capability change during an active run is a conflict (`uncommitted-capability-change`), detected via stateless `git diff` against `HEAD` with no persisted sidecar state file, like an interrupted step or active worktree.
 - Missing `testGates` does not excuse a weak proof: the closure proof still needs a verification that could fail, just of a different `kind`.
 - Never let a capability switch choose product priority, waive approval, or turn off a proof requirement.

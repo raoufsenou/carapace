@@ -7,7 +7,7 @@ import { renderBar } from './render.mjs'
 import { parseRegisterStatus } from './register.mjs'
 import { inspectAuditState } from './audit.mjs'
 import { detectAppProfile } from './app-profile.mjs'
-import { readGitState } from './git.mjs'
+import { detectUncommittedCapabilityChange, readGitState } from './git.mjs'
 import { detectInterruptedSteps } from './proofs.mjs'
 import { buildStageAndOptions, evaluatePromptConflicts, optionCapability } from './prompt.mjs'
 import { emptyRequirements, readRequirementsBrief, targetTaskIds } from './requirements.mjs'
@@ -23,8 +23,13 @@ export function readCarapaceStatus({
   if (!relConfig) throw new Error('Config path must be a non-empty repository-relative path.')
   const absConfig = join(root, relConfig)
   const gate = { yolo }
-  const appProfile = detectAppProfile(root)
+  const detectedAppProfile = detectAppProfile(root)
   const gitState = readGitState(root)
+  const appProfile = {
+    ...detectedAppProfile,
+    isGitRepo: gitState.isGitRepo,
+    hasWorktrees: gitState.worktrees.length > 1,
+  }
 
   if (!existsSync(absConfig)) {
     const legacyPlanCandidate = ['PLAN.md', 'docs/PLAN.md'].find((p) => existsSync(join(root, p))) ?? null
@@ -42,9 +47,18 @@ export function readCarapaceStatus({
       nextPrompt: '/carapace setup',
       auditState,
       interruptedSteps: [],
-      appProfile,
+      appProfile: detectedAppProfile,
       gitState,
-      capabilities: resolveCapabilities({}, appProfile),
+      capabilities: {
+        ...resolveCapabilities({}, appProfile),
+        uncommittedChange: {
+          changed: false,
+          configPath: relConfig,
+          headProfile: null,
+          currentProfile: null,
+          changedFields: [],
+        },
+      },
       requirements: emptyRequirements(),
     }
     const { stage, options } = buildStageAndOptions(base)
@@ -54,6 +68,7 @@ export function readCarapaceStatus({
 
   const config = readConfigObject(root, relConfig)
   const capabilities = resolveCapabilities(config, appProfile)
+  capabilities.uncommittedChange = detectUncommittedCapabilityChange(root, relConfig, config, gitState)
   const canonical = safeRelative(config?.canonical)
   if (!canonical) throw new Error(`Invalid canonical path in ${relConfig}`)
   const legacyCanonical = canonical !== CANONICAL_PLAN_PATH ? canonical : null
@@ -74,7 +89,7 @@ export function readCarapaceStatus({
       nextPrompt: '/carapace setup',
       auditState,
       interruptedSteps: [],
-      appProfile,
+      appProfile: detectedAppProfile,
       gitState,
       capabilities,
       requirements: emptyRequirements(),
@@ -97,7 +112,7 @@ export function readCarapaceStatus({
     ...parsed,
     auditState,
     interruptedSteps,
-    appProfile,
+    appProfile: detectedAppProfile,
     gitState,
     capabilities,
     requirements: readRequirementsBrief({

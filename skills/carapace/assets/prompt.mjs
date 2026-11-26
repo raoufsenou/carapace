@@ -431,6 +431,29 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     !/\b(?:run|execute|apply|fix|implement|build|add|refactor|create|update|change|remove|delete)\b/i.test(cleanCommand)
   if (isVerifyOnly) return { hasConflict: false, conflicts: [], warnings: [] }
 
+  const activeNow = Boolean(status.initialized) && hasRunnableNow(status.now)
+  if (activeNow && status.capabilities?.uncommittedChange?.changed === true) {
+    const change = status.capabilities.uncommittedChange
+    conflicts.push({
+      kind: 'uncommitted-capability-change',
+      message: `${change.configPath} has uncommitted capability changes (${change.changedFields.join(', ')}) while ${status.now} is active. Capability changes are maintainer decisions that must be committed (or reverted) in git before continuing; commit or revert the config change, then rerun /carapace.`,
+      options: [
+        {
+          id: 'verify-capability-change',
+          label: 'Inspect repository status and uncommitted capability changes before committing or reverting (Recommended)',
+          recommended: true,
+          command: '/carapace verify',
+        },
+        {
+          id: 'open-menu',
+          label: 'Open the Carapace status menu after committing or reverting the config change',
+          recommended: false,
+          command: '/carapace',
+        },
+      ],
+    })
+  }
+
   const knownIdSetUpper = new Set()
   for (const row of [...(status.rows ?? []), ...(status.unorderedRows ?? [])]) {
     if (typeof row?.id !== 'string' || !row.id) continue
@@ -864,7 +887,6 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     else warnings.push({ ...entry, message: `${entry.message} Yolo will show this as the brief and proceed.` })
   }
 
-  const activeNow = Boolean(status.initialized) && hasRunnableNow(status.now)
   const isLifecycleCommand =
     /^(?:run|execute|setup|init|initialize|migrate|audit|re-?audit|reconcile|decide|verdicts?|verify|check|status|advise|next|prompt|plan|report|yolo|lock|requirements|preempt|promote|proceed\s+without|apply\s+accepted\s+findings)\b/i.test(
       cleanCommand,
