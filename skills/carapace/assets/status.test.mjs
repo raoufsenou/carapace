@@ -577,3 +577,82 @@ test('documented menu and report commands do not collide with an active NOW', ()
   assert.equal(readCarapaceStatus({ root, prompt: 'verify', yolo: false }).gate.yolo, false)
 })
 
+test('pre-run requirements brief is extracted from the locked design authority', () => {
+  const root = tempRepo()
+  write(root, '.execution-plan-integrity.json', JSON.stringify({
+    schema: 2,
+    canonical: 'docs/execution-plan.md',
+    completionProofs: { directory: 'docs/execution-proofs' },
+    requiredGlobs: ['docs/**/*.md'],
+    roles: { evidence: ['docs/evidence/*.md'], design: ['docs/*.md'], validation: ['docs/validation/*.md'], archive: ['docs/archive/*.md'] },
+  }))
+  write(root, 'docs/execution-plan.md', [
+    '<!-- execution-role: canonical -->',
+    '<!-- execution-register:start -->',
+    '`NOW`: `REQ-TEST-STEP`',
+    '',
+    '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+    '| --- | --- | --- | --- | --- | --- |',
+    '| 1 | `REQ-TEST-STEP` | `IMPLEMENTATION` | `NOW` | Build the thing. | Plan |',
+    '<!-- execution-register:end -->',
+  ].join('\n'))
+  const authority = [
+    '<!-- execution-role: design -->',
+    '# Test requirements',
+    '',
+    'Locked 2026-11-26 from the maintainer\'s direction during `REQ-TEST-STEP`.',
+    'This is the authority for `REQ-TEST-STEP`. The register alone orders work.',
+    '',
+    '## Frozen requirements',
+    '',
+    '### REQ-T1 — first assertion',
+    'The first behavior holds.',
+    '',
+    '### REQ-T2 — second assertion',
+    'The second behavior holds.',
+    '',
+    '## Non-goals',
+    '',
+    '- No redesign.',
+    '- No paid call.',
+  ].join('\n')
+
+  write(root, 'docs/test-requirements.md', authority)
+  const locked = readCarapaceStatus({ root, prompt: 'run REQ-TEST-STEP' })
+  assert.equal(locked.requirements.status, 'LOCKED')
+  assert.equal(locked.requirements.taskId, 'REQ-TEST-STEP')
+  assert.deepEqual(locked.preflight.conflicts.map((conflict) => conflict.kind), [])
+  assert.equal(locked.requirements.source.path, 'docs/test-requirements.md')
+  assert.equal(locked.requirements.source.anchor, 'REQ-T1')
+  assert.equal(locked.requirements.lockedAt, '2026-11-26')
+  assert.deepEqual(locked.requirements.ids.map((id) => id.id), ['REQ-T1', 'REQ-T2'])
+  assert.deepEqual(locked.requirements.nonGoals, ['No redesign.', 'No paid call.'])
+
+  // Explicit task IDs in the prompt win over the NOW pointer.
+  write(root, 'docs/other-requirements.md', authority.replaceAll('REQ-TEST-STEP', 'OTHER-STEP'))
+  const explicit = readCarapaceStatus({ root, prompt: 'run OTHER-STEP' })
+  assert.equal(explicit.requirements.taskId, 'OTHER-STEP')
+  assert.equal(explicit.requirements.status, 'LOCKED')
+
+  // Two authorities for one task are ambiguous, never silently chosen.
+  write(root, 'docs/duplicate-requirements.md', authority)
+  const ambiguous = readCarapaceStatus({ root, prompt: 'run REQ-TEST-STEP' })
+  assert.equal(ambiguous.requirements.status, 'AMBIGUOUS')
+  assert.equal(ambiguous.requirements.candidates.length, 2)
+
+  rmSync(join(root, 'docs/test-requirements.md'), { force: true })
+  rmSync(join(root, 'docs/duplicate-requirements.md'), { force: true })
+  const missing = readCarapaceStatus({ root, prompt: 'run REQ-TEST-STEP' })
+  assert.equal(missing.requirements.status, 'MISSING')
+  assert.match(missing.requirements.note, /No design-role document/)
+  // Yolo still preflights and shows the brief, but does not stop for a decision.
+  assert.equal(missing.preflight.hasConflict, false)
+  assert.equal(missing.preflight.warnings[0].kind, 'requirements-not-locked')
+  assert.equal(missing.preflight.conflicts.length, 0)
+
+  // --no-yolo makes the same missing authority a blocking decision.
+  const gated = readCarapaceStatus({ root, prompt: 'run REQ-TEST-STEP', yolo: false })
+  assert.equal(gated.preflight.hasConflict, true)
+  assert.equal(gated.preflight.conflicts[0].kind, 'requirements-not-locked')
+  assert.match(gated.preflight.conflicts[0].options[0].command, /lock in the requirements/)
+})

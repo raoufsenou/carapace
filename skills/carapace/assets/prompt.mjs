@@ -591,6 +591,32 @@ export function evaluatePromptConflicts(status, rawPrompt) {
     })
   }
 
+  if (/\brun\b/i.test(text) && status.requirements && status.requirements.status !== 'LOCKED') {
+    const task = status.requirements.taskId ?? status.now ?? 'the task'
+    const entry = {
+      kind: 'requirements-not-locked',
+      message: `${task} has no locked requirements authority (status: ${status.requirements.status}). ${status.requirements.note ?? ''}`,
+      options: [
+        {
+          id: 'lock-requirements',
+          label: `Lock in the requirements for ${task} and add the necessary tickets first (Recommended)`,
+          recommended: true,
+          command: `/carapace lock in the requirements for ${task}`,
+        },
+        {
+          id: 'inspect-authority',
+          label: 'Inspect the current authority documents before deciding',
+          recommended: false,
+          command: '/carapace verify',
+        },
+      ],
+    }
+    // Yolo preflights and briefs, then proceeds. Only --no-yolo turns a missing
+    // authority into a blocking decision.
+    if (status.gate?.yolo === false) conflicts.push(entry)
+    else warnings.push({ ...entry, message: `${entry.message} Yolo will show this as the brief and proceed.` })
+  }
+
   const activeNow = status.initialized && status.now && status.now !== 'NONE' && status.now !== 'IDLE' && status.now !== 'SETUP'
   const mentionsKnownTask =
     (status.rows ?? []).some((row) => text.toUpperCase().includes(row.id.toUpperCase())) ||
