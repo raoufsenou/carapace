@@ -1,0 +1,182 @@
+{
+  "schema": 1,
+  "taskId": "RW-VERIFY-FLOOR",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-26",
+  "requirements": [
+    {
+      "id": "REQ-RW-1",
+      "statement": "Single root verification command covers every suite and guard",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-1"
+      },
+      "evidence": [
+        {
+          "path": "scripts/verify.mjs",
+          "symbol": "export const JS_TEST_SUITES = Object.freeze(["
+        },
+        {
+          "path": "scripts/verify.mjs",
+          "symbol": "export function buildVerificationSteps(root = REPO_ROOT)"
+        },
+        {
+          "path": "scripts/verify.mjs",
+          "symbol": "export function runVerification({"
+        },
+        {
+          "path": "skills/execution-plan-integrity/package.json",
+          "symbol": "node --test tests/skill.test.mjs tests/config.test.mjs assets/checker/execution-register.test.mjs"
+        },
+        {
+          "path": "scripts/verify.test.mjs",
+          "symbol": "runVerification exits 0 for a passing temporary test file and 1 for a failing assertion"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "pnpm --dir skills/execution-plan-integrity test",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-2",
+      "statement": "Execution-plan-integrity artifact checksums stay synchronized",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-2"
+      },
+      "evidence": [
+        {
+          "path": "skills/execution-plan-integrity/scripts/artifact.mjs",
+          "symbol": "'references/completion-proof.md': '9b4a2c0a01fdc01080f75564fc7f3be676bbf6478551a305da3b5b1a001e8db3'"
+        },
+        {
+          "path": "skills/execution-plan-integrity/scripts/artifact.mjs",
+          "symbol": "'assets/checker/check-execution-plan.mjs': '6679740e794e90583bc58f2ee323e20a0812af0a70f2c91fe78796f81aad2f37'"
+        },
+        {
+          "path": "skills/execution-plan-integrity/scripts/artifact.mjs",
+          "symbol": "'assets/checker/execution-register.test.mjs': '6910452a057b625166a06dc711042549d41ddb06a955e802166e53cd22b4b729'"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "static",
+          "command": "pnpm --dir skills/execution-plan-integrity lint",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node --test skills/execution-plan-integrity/tests/skill.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-3",
+      "statement": "Execution-plan checker excludes its own canonical skill package without weakening target checks",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-3"
+      },
+      "evidence": [
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "export function isCanonicalSkillPackageChecker(root, relativePath)"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "if (isCanonicalSkillPackageChecker(root, path)) continue"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/execution-register.test.mjs",
+          "symbol": "rejects target-repo checker copies under skills/execution-plan-integrity/assets/checker/ or assets/checker/ without source markers"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/execution-plan-integrity/assets/checker/execution-register.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "inspection",
+          "evidence": "Running checkExecutionProject against the Carapace repository root skipped only the three canonical checker files inside skills/execution-plan-integrity/assets/checker/ verified by package.json, SKILL.md frontmatter, scripts/artifact.mjs, and scripts/validate.mjs, while target-repo duplicates and extra source-repo copies still fail.",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "scripts/verify.mjs",
+    "scripts/verify.test.mjs",
+    "skills/execution-plan-integrity/package.json",
+    "skills/execution-plan-integrity/scripts/artifact.mjs",
+    "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+    "skills/execution-plan-integrity/assets/checker/execution-register.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node scripts/verify.mjs",
+      "implementation": "scripts/verify.mjs#runVerification",
+      "consumer": "scripts/verify.test.mjs#runVerification exits 0 for a passing temporary test file and 1 for a failing assertion"
+    },
+    {
+      "entryPoint": "pnpm --dir skills/execution-plan-integrity lint",
+      "implementation": "skills/execution-plan-integrity/scripts/artifact.mjs#ARTIFACT_SHA256",
+      "consumer": "skills/execution-plan-integrity/scripts/validate.mjs#validateSkill"
+    },
+    {
+      "entryPoint": "checkExecutionProject",
+      "implementation": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs#isCanonicalSkillPackageChecker",
+      "consumer": "skills/execution-plan-integrity/assets/checker/execution-register.test.mjs#excludes canonical execution-plan-integrity source package checkers in monorepo and standalone checkouts"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "A failing test assertion or unspawnable command causes the root verification runner to exit non-zero.",
+      "kind": "test",
+      "evidence": "scripts/verify.test.mjs runs runVerification against a real temporary failing node --test file (assert.equal(1, 2)) and against a nonexistent command, asserting ok === false and exitCode === 1.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Target-repo checker duplicates (including vendored copies under skills/execution-plan-integrity/assets/checker/ or assets/checker/ missing source package markers) and extra duplicates inside a canonical source repo still fail execution-plan checks.",
+      "kind": "test",
+      "evidence": "skills/execution-plan-integrity/assets/checker/execution-register.test.mjs tests vendored copies, bare assets/checker copies, malformed or mismatched package.json/SKILL.md, missing scripts/artifact.mjs or scripts/validate.mjs, and extra duplicates in a source repo, asserting duplication findings are reported.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Checksum drift, metadata drift, or missing artifact files fail skill validation and standalone installation.",
+      "kind": "test",
+      "evidence": "skills/execution-plan-integrity/tests/skill.test.mjs verifies validateSkill rejects metadata drift, missing references, extra installed files, and broken pins, and refuses installation when validation fails.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "DELIVERED"
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Live harness installation or replacement via scripts/install.mjs --replace against user homes (~/.claude, ~/.config/opencode, ~/.codex, ~/.cursor) remains manual per D-REWORK-HARDENING non-goals."
+  ],
+  "closedRow": "| 8 | `RW-VERIFY-FLOOR` | `IMPLEMENTATION` | `NOW` | Add a single root verification script covering all 9 JS test suites, `validate.mjs`, `check-live-tools-guard.mjs`, and `claude plugin test .`; add `tests/config.test.mjs` to `skills/execution-plan-integrity/package.json`; fix `check-execution-plan.mjs` self-duplication exclusion for the canonical skill package; update `ARTIFACT_SHA256` in `skills/execution-plan-integrity/scripts/artifact.mjs`. Closes when the root verify command, `validate.mjs`, `skill.test.mjs`, and `check-execution-plan.mjs --root .` all pass. | `D-REWORK-HARDENING` REQ-RW-1, REQ-RW-2, REQ-RW-3. |",
+  "notes": [
+    "isCanonicalSkillPackageChecker verifies canonical source-package markers (package.json name execution-plan-integrity-skill, SKILL.md name execution-plan-integrity, scripts/artifact.mjs, and scripts/validate.mjs) rather than comparing import.meta.url, so globally installed checkers and git worktrees still validate carapace while target-repo duplicates still fail.",
+    "scripts/verify.mjs strips NODE_TEST_CONTEXT and NODE_TEST_WORKER_ID when spawning child processes so nested node --test verification calls propagate failing exit codes accurately."
+  ]
+}

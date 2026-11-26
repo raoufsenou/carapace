@@ -1,0 +1,172 @@
+{
+  "schema": 1,
+  "taskId": "RW-FANOUT-REQ",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-26",
+  "requirements": [
+    {
+      "id": "REQ-RW-4",
+      "statement": "Fan-out analysis respects intervening gates and rejects unscoped rows",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-4"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/fanout.mjs",
+          "symbol": "function isImplementationRow(row)"
+        },
+        {
+          "path": "skills/carapace/assets/fanout.mjs",
+          "symbol": "if (leftPaths.length === 0 || rightPaths.length === 0) return true"
+        },
+        {
+          "path": "skills/carapace/assets/fanout.mjs",
+          "symbol": "if (!info.isImplementation || info.isBatch || info.isSharedBarrier || info.isGate || info.rawPaths.length === 0)"
+        },
+        {
+          "path": "skills/carapace/assets/fanout.mjs",
+          "symbol": "const candidateRows = nowIsImplementation ? orderedActive : orderedActive.slice(1)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "fanout analysis preserves non-IMPLEMENTATION register gates and rejects unscoped rows (REQ-RW-4)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-5",
+      "statement": "Requirements brief extraction resolves IDs, boundaries, formats, batches, and per-REQ anchors accurately",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-5"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/requirements.mjs",
+          "symbol": "export function targetTaskIds(status, prompt)"
+        },
+        {
+          "path": "skills/carapace/assets/requirements.mjs",
+          "symbol": "function taskIdPattern(id, flags = '')"
+        },
+        {
+          "path": "skills/carapace/assets/requirements.mjs",
+          "symbol": "function parseReqDefinitionLine(line)"
+        },
+        {
+          "path": "skills/carapace/assets/requirements.mjs",
+          "symbol": "function discoverAuditDesignAuthorities(root)"
+        },
+        {
+          "path": "skills/carapace/assets/requirements.mjs",
+          "symbol": "function aggregateTaskBriefs(effectiveIds, tasks, batchId = null)"
+        },
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "taskIds: targetTaskIds("
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "requirements target resolution handles natural prompts, dotted IDs, and token boundaries (REQ-RW-5)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "requirements extraction parses heading and bullet REQs while skipping fences, non-goals, and prose (REQ-RW-5)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "requirements extraction discovers standards.designAuthority safely and deduplicates with roles.design (REQ-RW-5)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "requirements extraction aggregates multi-task prompts and Batch rows with per-REQ sources (REQ-RW-5)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "skills/carapace/assets/fanout.mjs",
+    "skills/carapace/assets/requirements.mjs",
+    "skills/carapace/assets/core.mjs",
+    "skills/carapace/assets/status.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "parseRegisterStatus",
+      "implementation": "skills/carapace/assets/fanout.mjs#analyzeFanoutReadiness",
+      "consumer": "skills/carapace/assets/register.mjs#parseRegisterStatus"
+    },
+    {
+      "entryPoint": "readCarapaceStatus",
+      "implementation": "skills/carapace/assets/requirements.mjs#targetTaskIds",
+      "consumer": "skills/carapace/assets/core.mjs#readCarapaceStatus"
+    },
+    {
+      "entryPoint": "readCarapaceStatus",
+      "implementation": "skills/carapace/assets/requirements.mjs#readRequirementsBrief",
+      "consumer": "skills/carapace/assets/core.mjs#readCarapaceStatus"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Intervening VALIDATION or DESIGN rows, queued Batch rows after a non-IMPLEMENTATION NOW gate, and unscoped IMPLEMENTATION rows with empty rawPaths prevent fan-out classification.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs verifies intervening VALIDATION/DESIGN rows, queued Batch barriers, and unscoped IMPLEMENTATION rows return sequential and cap parallel slices before barriers.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Natural prompts never capture English words as task IDs, dotted and hyphenated IDs respect token boundaries without prefix collisions, and fences, non-goals, prose, archive roles, and path traversal are rejected.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs tests natural prompts falling back to NOW, AUTH-1 vs AUTH-10 and P1.2 vs P1.2.1/P1.20 boundary isolation, heading and bullet REQ parsing with fence/non-goal/prose exclusions, and safe standards.designAuthority discovery.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Multi-task prompts and Batch rows aggregate per-REQ { path, anchor } sources and fail closed when any member is MISSING or AMBIGUOUS.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs tests all-LOCKED, partial-MISSING, AMBIGUOUS, and direct-batch-fallback briefs under readCarapaceStatus with --no-yolo.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "DELIVERED"
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Preflight prompt conflict fixes (REQ-RW-6..8) and unrelated core.mjs/audit.mjs fixes (REQ-RW-9) remain queued in RW-PREFLIGHT-CORE."
+  ],
+  "closedRow": "| 9 | `RW-FANOUT-REQ` | `IMPLEMENTATION` | `NOW` | Harden `skills/carapace/assets/fanout.mjs` (preserve non-`IMPLEMENTATION` register gates, treat empty `rawPaths` as sequential, remove unused `join` import) and `skills/carapace/assets/requirements.mjs` (known-ID + dotted-ID resolution, case-sensitive fallback, token-boundary `taskId` matching, heading + bullet `REQ-*`, `standards.designAuthority`, multi-task/batch briefs, per-REQ `{ path, anchor }` sources) with unit tests. Closes when targeted and full verification suites pass. | `D-REWORK-HARDENING` REQ-RW-4, REQ-RW-5. |",
+  "notes": [
+    "Removed the unused join import from skills/carapace/assets/fanout.mjs and guarded against queued Batch rows after a non-IMPLEMENTATION NOW gate being misclassified as shared prerequisites.",
+    "requirements.mjs keeps targetTaskId and single-task readRequirementsBrief backward-compatible while adding targetTaskIds, per-REQ { path, anchor } sources, standards.designAuthority discovery deduplicated against roles.design, and multi-task/Batch brief aggregation."
+  ]
+}

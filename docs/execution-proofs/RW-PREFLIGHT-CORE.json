@@ -1,0 +1,268 @@
+{
+  "schema": 1,
+  "taskId": "RW-PREFLIGHT-CORE",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-26",
+  "requirements": [
+    {
+      "id": "REQ-RW-6",
+      "statement": "Every \"proceed without\" preflight option bypasses its conflict instead of looping",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-6"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "function hasBypass(source, specificPattern)"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "command: `/carapace proceed without capability: ${stripped}`"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "command: `/carapace proceed without migrating: ${stripped}`"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "command: `/carapace proceed without reconciliation: ${stripped}`"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "command: `/carapace proceed without verdicts: ${stripped}`"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "every proceed-without preflight option bypasses its conflict without looping (REQ-RW-6)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-7",
+      "statement": "Capability and parallel preflight gating cover bare audits, plural keywords, and unsafe fan-out modes",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-7"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "const PARALLEL_KEYWORDS_RE = /(?<![A-Za-z0-9_-])(?:parallel|fan[\\s-]?out|batch|worktrees?)(?![A-Za-z0-9_-])/i"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "const asksAudit = AUDIT_KEYWORDS_RE.test(cleanCommand)"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "if (asksParallel && status.fanoutAnalysis?.mode === 'sequential')"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "if (asksParallel && status.fanoutAnalysis?.mode === 'idle')"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "export function optionCapability(command)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "capability and parallel preflight gating cover bare audits, plural keywords, and unsafe fan-out modes (REQ-RW-7)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-8",
+      "statement": "Preflight guards IDLE/NONE, checks bare task-ID runs, and anchors lifecycle keyword matching",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-8"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "function hasRunnableNow(value)"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "function isBareTaskIdPrompt(command, knownIdSetUpper)"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "kind: 'no-active-now-task'"
+        },
+        {
+          "path": "skills/carapace/assets/prompt.mjs",
+          "symbol": "const isLifecycleCommand ="
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "preflight guards IDLE/NONE, checks bare task-ID runs, and anchors lifecycle keywords (REQ-RW-8)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    },
+    {
+      "id": "REQ-RW-9",
+      "statement": "Status core and audit state preserve capabilities, recommendation labels, and per-app tracking boundaries",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-9"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "const capabilities = resolveCapabilities(config, appProfile)"
+        },
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "const baseLabel = option.label.replace(/\\s+\\(Recommended\\)\\s*$/i, '')"
+        },
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "option.label = isNext ? `${baseLabel} (Recommended)` : baseLabel"
+        },
+        {
+          "path": "skills/carapace/assets/audit.mjs",
+          "symbol": "import { readFolder } from '../../app-slop-audit/assets/checker/check-records.mjs'"
+        },
+        {
+          "path": "skills/carapace/assets/audit.mjs",
+          "symbol": "function escapeRegExp(value)"
+        },
+        {
+          "path": "skills/carapace/assets/audit.mjs",
+          "symbol": "function isTargetTrackedInRegister(activeRows, audit, target, targets)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "core retains pre-canonical capabilities, syncs promoted Recommended labels, and isolates per-app audit tracking (REQ-RW-9)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-26"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    "skills/carapace/assets/prompt.mjs",
+    "skills/carapace/assets/core.mjs",
+    "skills/carapace/assets/audit.mjs",
+    "skills/carapace/assets/status.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "readCarapaceStatus",
+      "implementation": "skills/carapace/assets/prompt.mjs#evaluatePromptConflicts",
+      "consumer": "skills/carapace/assets/core.mjs#readCarapaceStatus"
+    },
+    {
+      "entryPoint": "readCarapaceStatus",
+      "implementation": "skills/carapace/assets/prompt.mjs#optionCapability",
+      "consumer": "skills/carapace/assets/core.mjs#readCarapaceStatus"
+    },
+    {
+      "entryPoint": "readCarapaceStatus",
+      "implementation": "skills/carapace/assets/audit.mjs#inspectAuditState",
+      "consumer": "skills/carapace/assets/core.mjs#readCarapaceStatus"
+    },
+    {
+      "entryPoint": "status.mjs",
+      "implementation": "skills/carapace/assets/core.mjs#readCarapaceStatus",
+      "consumer": "skills/carapace/assets/status.mjs#readCarapaceStatus"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Re-evaluating option 2 of capability-disabled, unmigrated-queue, unreconciled-multi-app-audit, and undecided-audit-findings bypasses that exact conflict without looping or cross-bypassing unrelated conflicts.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs feeds every option-2 command (with and without /carapace prefix) back into evaluatePromptConflicts, tests chained conflict isolation, and confirms no spurious active-now-task or no-undecided-findings conflicts.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Bare /carapace audit on docs-only raises capability-disabled while backend allows bare and non-ui audits, plural worktrees and bare parallel match consistently across preflight and optionCapability without falsely matching hyphenated task IDs, and parallel requests under sequential or idle raise parallel-not-ready.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs verifies docs-only bare audit gating, backend audit non-ui allowance, hyphenated task-ID non-collision (RW-FANOUT-REQ, APP-AUDIT-HOME, BROWSER-WEB-APP), optionCapability parity, and sequential/idle parallel-not-ready conflicts.",
+      "result": "passed"
+    },
+    {
+      "assertion": "IDLE and NONE never appear as runnable task IDs in active-batch-worktrees or requirements-not-locked, execute and unknown IDs raise no-active-now-task on IDLE/NONE, bare task-ID prompts check requirements, and ordinary feature prose containing report/lock/plan/status/next/requirements still raises active-now-task.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs verifies extra worktrees on IDLE/NONE, bare run/execute/unknown IDs under yolo and --no-yolo, bare task-ID requirements checks, and anchored lifecycle matching against feature prose prompts.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Pre-canonical configs preserve resolved capabilities, disabled-top-option promotion synchronizes (Recommended) labels with option.recommended, and audit tracking isolates sibling apps, prefix-sharing targets, regex metacharacters, and ui vs non-ui rows.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs tests pre-canonical docs-only configs, fallback Recommended promotion in parallel and idle modes, sibling/prefix/metacharacter target matching, and ui vs non-ui cross-audit isolation.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "DELIVERED"
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Register hook JSONC and prompt reset fixes (REQ-RW-10) and OpenCode installer replacement assertions (REQ-RW-11) remain queued in RW-HOOKS-INSTALL.",
+    "Published JSON Schema, expanded capability drift detection, and stateless active-run capability-change conflict detection (REQ-RW-12, REQ-RW-13) remain queued in RW-SCHEMA-CAP."
+  ],
+  "closedRow": "| 10 | `RW-PREFLIGHT-CORE` | `IMPLEMENTATION` | `NOW` | Fix `skills/carapace/assets/prompt.mjs` (bypassable \"proceed without\" commands, bare `/carapace audit` capability gating, plural `worktrees`/bare `parallel`, `asksParallel` under `sequential`/`idle`, `IDLE`/`NONE` guards, bare task-ID requirement checks, anchored `isLifecycleCommand`), `skills/carapace/assets/core.mjs` (preserve capabilities pre-canonical, sync `\" (Recommended)\"` label on fallback), and `skills/carapace/assets/audit.mjs` (escape `target` RegExp, narrow `trackedInRegister`, drop unused `runChecks`) with unit tests. Closes when all preflight and core tests pass. | `D-REWORK-HARDENING` REQ-RW-6, REQ-RW-7, REQ-RW-8, REQ-RW-9. |",
+  "notes": [
+    "Orchestrator adversarial review tightened PARALLEL_KEYWORDS_RE, AUDIT_KEYWORDS_RE, UI_AUDIT_SCOPE_RE, and DEV_SERVER_KEYWORDS_RE so hyphenated task IDs (RW-FANOUT-REQ, BROWSER-WEB-APP) and /carapace audit non-ui do not falsely match parallel/devServer/uiAudit gates, and narrowed audit.mjs non-ui cross-audit filtering for UI-prefixed rows without literal docs/audit/ui paths.",
+    "No files under skills/execution-plan-integrity/ were modified, so ARTIFACT_SHA256 remains unchanged."
+  ]
+}
