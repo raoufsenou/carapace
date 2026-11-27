@@ -340,3 +340,53 @@ test('opencode agent transform fails loudly when any OPENCODE_BODY_REPLACEMENTS 
     OPENCODE_BODY_REPLACEMENTS.map(([from]) => from),
   )
 })
+
+test('real checkout agents keep D-MODEL-INHERIT frontmatter, remove hardcoded pnpm, and pass OpenCode transform (REQ-AC-5)', () => {
+  const checkoutRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const expectedFiles = [
+    'carapace-advisor.md',
+    'carapace-careful.md',
+    'carapace-fable.md',
+    'carapace-heavy.md',
+    'carapace-light.md',
+    'carapace-medium.md',
+  ]
+  assert.deepEqual(readdirSync(join(checkoutRoot, 'agents')).sort(), expectedFiles)
+
+  for (const file of expectedFiles) {
+    const content = readFileSync(join(checkoutRoot, 'agents', file), 'utf8')
+    const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(content)
+    assert.ok(match, `${file} must have YAML frontmatter`)
+    const [, frontmatter, body] = match
+    assert.match(frontmatter, /^model: inherit$/m, `${file} must keep model: inherit`)
+    assert.doesNotMatch(frontmatter, /^effort:/m, `${file} must omit frontmatter effort:`)
+    const toolsLine = /^tools:\s*(.+)$/m.exec(frontmatter)?.[1] ?? ''
+    assert.ok(toolsLine.length > 0, `${file} must declare tools:`)
+    assert.doesNotMatch(toolsLine, /\bAgent\b/, `${file} tools: must exclude Agent`)
+    assert.doesNotMatch(content, /Always use `pnpm`/i, `${file} must not hardcode Always use \`pnpm\``)
+    if (file !== 'carapace-advisor.md') {
+      assert.ok(body.includes('agents.packageManager'), `${file} must honor agents.packageManager`)
+    }
+  }
+
+  const skillText = readFileSync(join(checkoutRoot, 'skills', 'carapace', 'SKILL.md'), 'utf8')
+  assert.doesNotMatch(skillText, /Always use `pnpm`/i, 'SKILL.md must not hardcode Always use `pnpm`')
+  assert.ok(skillText.includes('agents.packageManager'), 'SKILL.md must honor agents.packageManager')
+
+  const opencodeHome = join(temporaryRoot(), 'opencode-real')
+  const results = install({ checkout: checkoutRoot, opencodeHome, targets: ['opencode'] })
+  assert.deepEqual(results.map((r) => [r.target, r.action]), [
+    ['opencode', 'installed'],
+    ['opencode', 'installed'],
+  ])
+  assert.deepEqual(readdirSync(join(opencodeHome, 'agents')).sort(), expectedFiles)
+  for (const file of expectedFiles) {
+    const transformed = readFileSync(join(opencodeHome, 'agents', file), 'utf8')
+    const frontmatter = /^---\n([\s\S]*?)\n---\n/.exec(transformed)?.[1] ?? ''
+    assert.doesNotMatch(frontmatter, /^(name|model|tools|effort):/m, `OpenCode ${file} must strip Claude-only frontmatter`)
+    assert.match(frontmatter, /^mode: subagent$/m)
+    assert.match(transformed, /action: subagent/)
+    assert.match(transformed, /effect: deny/)
+    assert.doesNotMatch(transformed, /mcp__carapace__step|model: inherit|Always use `pnpm`/i)
+  }
+})

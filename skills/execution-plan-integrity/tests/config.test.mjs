@@ -5,9 +5,12 @@ import { dirname, join, resolve } from 'node:path'
 import { afterEach, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import {
+  AGENT_EFFORT_LEVELS,
+  AGENT_TIERS,
   CANONICAL_PLAN_PATH,
   CAPABILITY_KEYS,
   CAPABILITY_PROFILES,
+  DEFAULT_AGENT_EFFORTS,
   parseJsonc,
   readExecutionConfig,
 } from '../assets/checker/check-execution-plan.mjs'
@@ -238,4 +241,71 @@ test('JSON Schema and readExecutionConfig agree on valid and invalid configs (RE
   assert.ok(validateSchema(baseObject({ profiles: 'backend' })).length > 0)
   assert.ok(validateSchema(baseObject({ completionProofs: { directory: '\\proofs' } })).length > 0)
   assert.ok(validateSchema(baseObject({ completionProofs: { directory: 'C:\\proofs' } })).length > 0)
+})
+
+test('agents block schema constants and validation stay in strict parity with readExecutionConfig (REQ-AC-1)', () => {
+  assert.deepEqual(Object.keys(CONFIG_SCHEMA.properties.agents.properties.tiers.properties), AGENT_TIERS)
+  assert.deepEqual(CONFIG_SCHEMA.$defs.agentEffort.enum, AGENT_EFFORT_LEVELS)
+  assert.deepEqual(Object.keys(DEFAULT_AGENT_EFFORTS), AGENT_TIERS)
+  for (const tier of AGENT_TIERS) {
+    assert.ok(AGENT_EFFORT_LEVELS.includes(DEFAULT_AGENT_EFFORTS[tier]), `default effort for ${tier} must be valid`)
+  }
+
+  const allTiers = Object.fromEntries(AGENT_TIERS.map((tier) => [tier, { effort: DEFAULT_AGENT_EFFORTS[tier] }]))
+  const validCases = [
+    ['absent agents', baseObject()],
+    ['empty agents object', baseObject({ agents: {} })],
+    ['empty tiers object', baseObject({ agents: { tiers: {} } })],
+    ['partial tiers', baseObject({ agents: { tiers: { light: { effort: 'medium' }, careful: { effort: 'high' } } } })],
+    ['full tiers', baseObject({ agents: { tiers: allTiers } })],
+    ['packageManager only', baseObject({ agents: { packageManager: 'pnpm' } })],
+    ['empty extraRules array', baseObject({ agents: { extraRules: [] } })],
+    ['populated extraRules', baseObject({ agents: { extraRules: ['Never run live install scripts.', 'Use strict TS.'] } })],
+    [
+      'complete agents block',
+      baseObject({
+        agents: {
+          tiers: allTiers,
+          packageManager: 'bun',
+          extraRules: ['Keep migrations reversible.'],
+        },
+      }),
+    ],
+  ]
+
+  for (const [label, obj] of validCases) {
+    assert.deepEqual(validateSchema(obj), [], `schema should accept ${label}`)
+    const parsed = readExecutionConfig(repo(JSON.stringify(obj)))
+    assert.deepEqual(parsed.agents, obj.agents ?? null, `checker should preserve ${label}`)
+  }
+
+  const invalidCases = [
+    ['agents is null', baseObject({ agents: null })],
+    ['agents is array', baseObject({ agents: [] })],
+    ['agents is string', baseObject({ agents: 'pnpm' })],
+    ['unknown agents key', baseObject({ agents: { maxParallel: 2 } })],
+    ['agents.tiers is null', baseObject({ agents: { tiers: null } })],
+    ['agents.tiers is array', baseObject({ agents: { tiers: [] } })],
+    ['unknown tier name', baseObject({ agents: { tiers: { turbo: { effort: 'high' } } } })],
+    ['tier config is null', baseObject({ agents: { tiers: { light: null } } })],
+    ['tier config is string', baseObject({ agents: { tiers: { light: 'low' } } })],
+    ['empty tier config {}', baseObject({ agents: { tiers: { careful: {} } } })],
+    ['tier model override only', baseObject({ agents: { tiers: { heavy: { model: 'opus' } } } })],
+    ['tier model alongside effort', baseObject({ agents: { tiers: { heavy: { effort: 'xhigh', model: 'opus' } } } })],
+    ['tier effort inherit', baseObject({ agents: { tiers: { careful: { effort: 'inherit' } } } })],
+    ['tier invalid effort string', baseObject({ agents: { tiers: { fable: { effort: 'ultra' } } } })],
+    ['tier non-string effort', baseObject({ agents: { tiers: { light: { effort: 1 } } } })],
+    ['empty packageManager', baseObject({ agents: { packageManager: '' } })],
+    ['whitespace packageManager', baseObject({ agents: { packageManager: '   \t ' } })],
+    ['non-string packageManager', baseObject({ agents: { packageManager: 42 } })],
+    ['non-array extraRules', baseObject({ agents: { extraRules: 'pnpm only' } })],
+    ['empty string in extraRules', baseObject({ agents: { extraRules: [''] } })],
+    ['whitespace entry in extraRules', baseObject({ agents: { extraRules: ['valid', '   '] } })],
+    ['non-string entry in extraRules', baseObject({ agents: { extraRules: ['valid', 123] } })],
+  ]
+
+  for (const [label, obj] of invalidCases) {
+    assert.ok(validateSchema(obj).length > 0, `schema should reject ${label}`)
+    assert.throws(() => readExecutionConfig(repo(JSON.stringify(obj))), `checker should reject ${label}`)
+  }
 })

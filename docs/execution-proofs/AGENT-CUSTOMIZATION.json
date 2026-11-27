@@ -1,0 +1,337 @@
+{
+  "schema": 1,
+  "taskId": "AGENT-CUSTOMIZATION",
+  "taskKind": "IMPLEMENTATION",
+  "outcome": "IMPLEMENTED",
+  "completedAt": "2026-11-27",
+  "requirements": [
+    {
+      "id": "REQ-AC-1",
+      "statement": "Optional `agents` config block has strict JSON Schema and checker parity",
+      "source": {
+        "path": "docs/agent-customization-design.md",
+        "anchor": "REQ-AC-1"
+      },
+      "evidence": [
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "export const AGENT_TIERS = ['advisor', 'light', 'medium', 'careful', 'heavy', 'fable']"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "export const AGENT_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "export const DEFAULT_AGENT_EFFORTS = {"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "function readAgents(config) {"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+          "symbol": "const agents = readAgents(config)"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+          "symbol": "\"agentEffort\": {"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+          "symbol": "\"agentTierConfig\": {"
+        },
+        {
+          "path": "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+          "symbol": "\"nonBlankString\": {"
+        },
+        {
+          "path": "skills/execution-plan-integrity/tests/config.test.mjs",
+          "symbol": "agents block schema constants and validation stay in strict parity with readExecutionConfig (REQ-AC-1)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/execution-plan-integrity/tests/config.test.mjs skills/execution-plan-integrity/tests/skill.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-AC-2",
+      "statement": "Execution-plan-integrity artifact checksums stay synchronized",
+      "source": {
+        "path": "docs/agent-customization-design.md",
+        "anchor": "REQ-AC-2"
+      },
+      "evidence": [
+        {
+          "path": "skills/execution-plan-integrity/scripts/artifact.mjs",
+          "symbol": "'assets/checker/check-execution-plan.mjs': '386f76650e95f1e74798a00cd4d90c84f40eeb7efa82c84ec873005c6162aec5'"
+        },
+        {
+          "path": "skills/execution-plan-integrity/scripts/artifact.mjs",
+          "symbol": "'assets/execution-plan-integrity.schema.json': '9b0209bb3064e1a91b866fa87dcb4bda96cc8a8d5393ab696779137272b92ea4'"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "static",
+          "command": "node skills/execution-plan-integrity/scripts/validate.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node --test skills/execution-plan-integrity/tests/skill.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-AC-3",
+      "statement": "Status inspector resolves per-tier efforts and repo worker conventions across all repo states",
+      "source": {
+        "path": "docs/agent-customization-design.md",
+        "anchor": "REQ-AC-3"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/assets/config.mjs",
+          "symbol": "export function resolveAgents(config) {"
+        },
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "agents: resolveAgents({}),"
+        },
+        {
+          "path": "skills/carapace/assets/core.mjs",
+          "symbol": "const agents = resolveAgents(config)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "resolveAgents and status.mjs surface tier efforts, packageManager, extraRules, fallback vs --check, and zero capability conflict (REQ-AC-3)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-AC-4",
+      "statement": "Orchestrator playbooks mandate config-driven effort across all six tiers while preserving `D-MODEL-INHERIT`",
+      "source": {
+        "path": "docs/agent-customization-design.md",
+        "anchor": "REQ-AC-4"
+      },
+      "evidence": [
+        {
+          "path": "skills/carapace/SKILL.md",
+          "symbol": "**Config-driven `effort` (Claude Code only) & worker conventions (all harnesses)**"
+        },
+        {
+          "path": "skills/carapace/SKILL.md",
+          "symbol": "per-tier agent efforts, package manager, and extra worker rules -> `references/agents.md`"
+        },
+        {
+          "path": "skills/carapace/references/agents.md",
+          "symbol": "## What stays static in `agents/carapace-*.md`"
+        },
+        {
+          "path": "skills/carapace/references/agents.md",
+          "symbol": "Codex, Cursor, and OpenCode ignore `effort`"
+        },
+        {
+          "path": "skills/carapace/references/run.md",
+          "symbol": "| Careful | `carapace-careful` | `high` |"
+        },
+        {
+          "path": "skills/carapace/references/run.md",
+          "symbol": "**Config-driven `effort` (Claude Code only)**"
+        },
+        {
+          "path": "skills/carapace/references/audit.md",
+          "symbol": "in Claude Code only, pass `effort` = `agents.tiers.<tier>.effort` from `status.mjs --json`"
+        },
+        {
+          "path": "skills/carapace/references.test.mjs",
+          "symbol": "agents.md, SKILL.md, run.md, and audit.md enforce config-driven effort, D-MODEL-INHERIT, and cross-harness scope (REQ-AC-4)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/references.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-AC-5",
+      "statement": "Agent markdown definitions keep static boundaries and OpenCode transform invariants while removing hardcoded `pnpm`",
+      "source": {
+        "path": "docs/agent-customization-design.md",
+        "anchor": "REQ-AC-5"
+      },
+      "evidence": [
+        {
+          "path": "agents/carapace-light.md",
+          "symbol": "Use the package manager specified in the brief (`agents.packageManager`)"
+        },
+        {
+          "path": "agents/carapace-medium.md",
+          "symbol": "Use the package manager specified in the brief (`agents.packageManager`)"
+        },
+        {
+          "path": "agents/carapace-careful.md",
+          "symbol": "Use the package manager specified in the brief (`agents.packageManager`)"
+        },
+        {
+          "path": "agents/carapace-heavy.md",
+          "symbol": "Use the package manager specified in the brief (`agents.packageManager`)"
+        },
+        {
+          "path": "agents/carapace-fable.md",
+          "symbol": "Use the package manager specified in the brief (`agents.packageManager`)"
+        },
+        {
+          "path": "scripts/install.test.mjs",
+          "symbol": "real checkout agents keep D-MODEL-INHERIT frontmatter, remove hardcoded pnpm, and pass OpenCode transform (REQ-AC-5)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test scripts/install.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    },
+    {
+      "id": "REQ-AC-6",
+      "statement": "Carapace dogfoods its `agents` config and passes full repository verification",
+      "source": {
+        "path": "docs/agent-customization-design.md",
+        "anchor": "REQ-AC-6"
+      },
+      "evidence": [
+        {
+          "path": ".execution-plan-integrity.json",
+          "symbol": "\"packageManager\": \"pnpm\""
+        },
+        {
+          "path": ".execution-plan-integrity.json",
+          "symbol": "\"careful\": { \"effort\": \"high\" }"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node skills/carapace/assets/status.mjs --root . --check",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "inspection",
+          "command": "node skills/carapace/assets/status.mjs --root . --json",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    ".execution-plan-integrity.json",
+    "agents/carapace-careful.md",
+    "agents/carapace-fable.md",
+    "agents/carapace-heavy.md",
+    "agents/carapace-light.md",
+    "agents/carapace-medium.md",
+    "docs/agent-customization-design.md",
+    "scripts/install.test.mjs",
+    "skills/carapace/SKILL.md",
+    "skills/carapace/assets/config.mjs",
+    "skills/carapace/assets/core.mjs",
+    "skills/carapace/assets/status.test.mjs",
+    "skills/carapace/references.test.mjs",
+    "skills/carapace/references/agents.md",
+    "skills/carapace/references/audit.md",
+    "skills/carapace/references/run.md",
+    "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs",
+    "skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
+    "skills/execution-plan-integrity/scripts/artifact.mjs",
+    "skills/execution-plan-integrity/tests/config.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs --root <repo>",
+      "implementation": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs#function readAgents(config) {",
+      "consumer": "skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs#const agents = readAgents(config)"
+    },
+    {
+      "entryPoint": "node skills/execution-plan-integrity/scripts/validate.mjs",
+      "implementation": "skills/execution-plan-integrity/scripts/artifact.mjs#'assets/execution-plan-integrity.schema.json'",
+      "consumer": "skills/execution-plan-integrity/scripts/validate.mjs#for (const file of REQUIRED_ARTIFACT_FILES)"
+    },
+    {
+      "entryPoint": "node skills/carapace/assets/status.mjs --root <repo> --json",
+      "implementation": "skills/carapace/assets/config.mjs#export function resolveAgents(config) {",
+      "consumer": "skills/carapace/assets/core.mjs#const agents = resolveAgents(config)"
+    },
+    {
+      "entryPoint": "node scripts/install.mjs --target opencode",
+      "implementation": "agents/carapace-careful.md#Use the package manager specified in the brief (`agents.packageManager`)",
+      "consumer": "scripts/install.test.mjs#real checkout agents keep D-MODEL-INHERIT frontmatter, remove hardcoded pnpm, and pass OpenCode transform (REQ-AC-5)"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Invalid `agents` config variants (non-object `agents`, unknown `agents` keys, unknown tier names, empty tier `{}` without `effort`, per-tier `model` overrides, `effort: \"inherit\"`, invalid or non-string efforts, blank/non-string `packageManager`, and non-array or blank/non-string `extraRules`) are rejected identically by both `execution-plan-integrity.schema.json` and `readExecutionConfig`.",
+      "kind": "test",
+      "evidence": "skills/execution-plan-integrity/tests/config.test.mjs cross-checks 9 valid and 22 invalid `agents` configs against both validateSchema and readExecutionConfig and verifies schema constants match AGENT_TIERS and AGENT_EFFORT_LEVELS.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Malformed `agents` fields fall back cleanly to built-in defaults (including `careful: \"high\"`) in `status.mjs --json` without throwing while `status.mjs --check` rejects them, and `agents`-only uncommitted edits in a git repo with active `NOW` do not raise `uncommitted-capability-change`.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs exercises resolveAgents and status.mjs CLI across uninitialized, pre-canonical, initialized, invalid-field, and active-NOW git-repo edit scenarios.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Real checkout agent markdown definitions preserve `model: inherit`, omit frontmatter `effort:`, exclude `Agent` from `tools:`, remove hardcoded `Always use \\`pnpm\\`` across all five workers and `SKILL.md`, and pass OpenCode V2 install transformation matching every `OPENCODE_BODY_REPLACEMENTS` entry.",
+      "kind": "test",
+      "evidence": "scripts/install.test.mjs runs install({ checkout, opencodeHome, targets: ['opencode'] }) against the real checkout and asserts frontmatter, permissions, body replacements, and absence of hardcoded pnpm.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "DELIVERED"
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Per-tier model overrides and an `inherit` effort value remain disallowed per D-MODEL-INHERIT and D-AGENT-CUSTOMIZATION.",
+    "Hook-level `Agent` call mutation in hooks/register.tsx remains out of scope; hooks already render `model · effort` from turn.step.",
+    "Live scripts/install.mjs --replace against real maintainer harness homes (~/.claude, ~/.config/opencode, ~/.codex, ~/.cursor) remains manual; automated verification uses temporary directories only."
+  ],
+  "closedRow": "| 14 | `AGENT-CUSTOMIZATION` | `IMPLEMENTATION` | `NOW` | Add optional `agents` customization (`tiers.<tier>.effort` for all six tiers including `careful`, `packageManager`, `extraRules`) to `.execution-plan-integrity.json` with strict schema/`check-execution-plan.mjs`/`artifact.mjs` parity, `status.mjs --json` resolution (`resolveAgents`), updated orchestrator playbooks (`SKILL.md`, `references/run.md`, `references/audit.md`, `references/agents.md`) passing resolved `effort` on all Claude Code `Agent` spawns while preserving `D-MODEL-INHERIT`, repo-configurable package manager wording in `agents/carapace-*.md` without breaking `OPENCODE_BODY_REPLACEMENTS`, and Carapace dogfooding + tests. Closes when `config.test.mjs`, `skill.test.mjs`, `validate.mjs`, `references.test.mjs`, `status.test.mjs`, `install.test.mjs`, `status.mjs --root . --check`, and `node scripts/verify.mjs` pass. | `D-AGENT-CUSTOMIZATION` `docs/agent-customization-design.md` REQ-AC-1..REQ-AC-6. |",
+  "notes": [
+    "Including skills/execution-plan-integrity/scripts/artifact.mjs in implementationLedger lets completion-proof.mjs isPathTouchedLater supersede RW-SCHEMA-CAP's prior schema SHA-256 citation without modifying any closed proof file.",
+    "All six tiers (advisor, light, medium, careful, heavy, fable) resolve to explicit effort levels so Claude Code spawns never omit effort while Codex, Cursor, and OpenCode ignore effort and still receive packageManager and extraRules."
+  ]
+}

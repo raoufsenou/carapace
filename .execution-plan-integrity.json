@@ -12,5 +12,19 @@
     "validation": ["docs/**/*validation*.md"],
     "design": ["docs/**/*design*.md"],
     "archive": ["docs/archive/**/*.md"]
+  },
+  "agents": {
+    "tiers": {
+      "advisor": { "effort": "medium" },
+      "light": { "effort": "low" },
+      "medium": { "effort": "medium" },
+      "careful": { "effort": "high" },
+      "heavy": { "effort": "xhigh" },
+      "fable": { "effort": "max" }
+    },
+    "packageManager": "pnpm",
+    "extraRules": [
+      "Never run live scripts/install.mjs --replace against user home directories; temp-dir tests only."
+    ]
   }
 }

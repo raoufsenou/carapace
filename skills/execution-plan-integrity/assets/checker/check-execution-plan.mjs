@@ -22,6 +22,17 @@ export const CAPABILITY_PROFILES = {
   frontend: { uiAudit: true, nonUiAudit: false, fanoutWorktrees: true, devServer: true, testGates: true },
   fullstack: { uiAudit: true, nonUiAudit: true, fanoutWorktrees: true, devServer: true, testGates: true },
 }
+export const AGENT_TIERS = ['advisor', 'light', 'medium', 'careful', 'heavy', 'fable']
+export const AGENT_EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
+export const DEFAULT_AGENT_EFFORTS = {
+  advisor: 'medium',
+  light: 'low',
+  medium: 'medium',
+  careful: 'high',
+  heavy: 'xhigh',
+  fable: 'max',
+}
+const AGENT_KEYS = ['tiers', 'packageManager', 'extraRules']
 export const CANONICAL_PLAN_PATH = 'docs/execution-plan.md'
 export const CANONICAL_WORD_LIMIT = 10000
 const LOCAL_IMPLEMENTATION_GLOBS = [
@@ -181,6 +192,51 @@ function readCapabilities(config) {
   return { profile, capabilities: raw }
 }
 
+function readAgents(config) {
+  const raw = config.agents
+  if (raw === undefined) return null
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error('agents must be an object.')
+  }
+  for (const key of Object.keys(raw)) {
+    if (!AGENT_KEYS.includes(key)) throw new Error(`Unknown agents key: ${key}`)
+  }
+  if (raw.packageManager !== undefined) {
+    if (typeof raw.packageManager !== 'string' || raw.packageManager.trim().length === 0) {
+      throw new Error('agents.packageManager must be a non-empty string.')
+    }
+  }
+  if (raw.extraRules !== undefined) {
+    if (
+      !Array.isArray(raw.extraRules)
+      || raw.extraRules.some((item) => typeof item !== 'string' || item.trim().length === 0)
+    ) {
+      throw new Error('agents.extraRules must be an array of non-empty strings.')
+    }
+  }
+  if (raw.tiers !== undefined) {
+    if (!raw.tiers || typeof raw.tiers !== 'object' || Array.isArray(raw.tiers)) {
+      throw new Error('agents.tiers must be an object.')
+    }
+    for (const [tier, tierConfig] of Object.entries(raw.tiers)) {
+      if (!AGENT_TIERS.includes(tier)) throw new Error(`Unknown agent tier: ${tier}`)
+      if (!tierConfig || typeof tierConfig !== 'object' || Array.isArray(tierConfig)) {
+        throw new Error(`agents.tiers.${tier} must be an object.`)
+      }
+      for (const key of Object.keys(tierConfig)) {
+        if (key !== 'effort') throw new Error(`Unknown key in agents.tiers.${tier}: ${key}`)
+      }
+      if (!Object.prototype.hasOwnProperty.call(tierConfig, 'effort')) {
+        throw new Error(`agents.tiers.${tier}.effort is required.`)
+      }
+      if (typeof tierConfig.effort !== 'string' || !AGENT_EFFORT_LEVELS.includes(tierConfig.effort)) {
+        throw new Error(`Invalid effort for agents.tiers.${tier}: ${String(tierConfig.effort)}`)
+      }
+    }
+  }
+  return raw
+}
+
 export function readExecutionConfig(root, configPath = DEFAULT_CONFIG) {
   const relativeConfig = safeRelativePath(configPath, 'Config path')
   const absolute = join(root, relativeConfig)
@@ -192,6 +248,7 @@ export function readExecutionConfig(root, configPath = DEFAULT_CONFIG) {
   }
   if (config?.schema !== 2) throw new Error('Execution-plan config schema must be 2.')
   const { profile, capabilities } = readCapabilities(config)
+  const agents = readAgents(config)
   const canonical = safeRelativePath(config.canonical, 'Canonical path')
   if (canonical !== CANONICAL_PLAN_PATH) {
     throw new Error(
@@ -214,7 +271,7 @@ export function readExecutionConfig(root, configPath = DEFAULT_CONFIG) {
     if (!ROLES.has(role)) throw new Error(`Unknown execution role in config: ${role}`)
     roles[role] = stringList(patterns, `roles.${role}`)
   }
-  return { canonical, requiredGlobs, roles, completionProofDirectory, profile, capabilities }
+  return { canonical, requiredGlobs, roles, completionProofDirectory, profile, capabilities, agents }
 }
 
 function matches(root, patterns) {

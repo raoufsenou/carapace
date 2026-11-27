@@ -81,6 +81,45 @@
           "type": "boolean"
         }
       }
+    },
+    "agents": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "advisor": {
+              "$ref": "#/$defs/agentTierConfig"
+            },
+            "light": {
+              "$ref": "#/$defs/agentTierConfig"
+            },
+            "medium": {
+              "$ref": "#/$defs/agentTierConfig"
+            },
+            "careful": {
+              "$ref": "#/$defs/agentTierConfig"
+            },
+            "heavy": {
+              "$ref": "#/$defs/agentTierConfig"
+            },
+            "fable": {
+              "$ref": "#/$defs/agentTierConfig"
+            }
+          }
+        },
+        "packageManager": {
+          "$ref": "#/$defs/nonBlankString"
+        },
+        "extraRules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonBlankString"
+          }
+        }
+      }
     }
   },
   "if": {
@@ -118,6 +157,25 @@
       "type": "string",
       "minLength": 1,
       "pattern": "^(?!/)(?!\\\\)(?![A-Za-z]:)(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$"
+    },
+    "nonBlankString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "agentEffort": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "xhigh", "max"]
+    },
+    "agentTierConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["effort"],
+      "properties": {
+        "effort": {
+          "$ref": "#/$defs/agentEffort"
+        }
+      }
     }
   }
 }

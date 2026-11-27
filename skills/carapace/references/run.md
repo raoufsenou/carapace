@@ -23,20 +23,21 @@ Use when the repository is already set up with `.execution-plan-integrity.json` 
 
 ### 3. Subagent Roles (`carapace-advisor` & `carapace-*` Workers)
 
-**Model inheritance (`D-MODEL-INHERIT`) — non-negotiable**:
-- Every `carapace:*` spawn **omits any model override**: in Claude Code, omit the Agent tool `model` parameter so frontmatter `model: inherit` takes the orchestrator's live model; in OpenCode, use the `subagent` tool with no model field so the child inherits the parent session model; in Codex and Cursor, use native delegation without a model override. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model/effort override for a `carapace:*` spawn.
+**Model inheritance (`D-MODEL-INHERIT`) & config-driven `effort` — non-negotiable**:
+- Every `carapace:*` spawn **omits any model override**: in Claude Code, omit the Agent tool `model` parameter so frontmatter `model: inherit` takes the orchestrator's live model; in OpenCode, use the `subagent` tool with no model field so the child inherits the parent session model; in Codex and Cursor, use native delegation without a model override. Never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other model override for a `carapace:*` spawn.
+- **Config-driven `effort` (Claude Code only)**: Pass `effort` from `status.mjs --json` (`agents.tiers.<tier>.effort`) on every Claude Code `Agent` spawn across all six tiers (`advisor`, `light`, `medium`, `careful`, `heavy`, `fable`) — never guess `effort` ad-hoc. `effort` applies only in Claude Code; Codex, Cursor, and OpenCode ignore `effort` while still receiving `agents.packageManager` (when set) and `agents.extraRules` (when non-empty) in delegated worker briefs (see `references/agents.md`).
 - Only the orchestrator spawns `carapace:*` workers/advisors. Workers must not re-delegate: Claude Code workers' `tools:` allowlists exclude `Agent`; OpenCode workers carry a `subagent: deny` permission; Codex and Cursor rely on this prompt rule.
 - In Claude Code, spawn workers in the **foreground** so review and close happen in the same turn. OpenCode subagents always run in the background: spawn with the `subagent` tool (`agent` ID, `description` = task title, complete `prompt`), keep working, and review the result when the child reports idle. Codex and Cursor follow their harness's delegation behavior.
 - Match the subagent **role** (not model) to the nature of the task:
 
-| Role | Agent | Use for |
-|------|-------|---------|
-| Advisor | `carapace-advisor` | Read-only repo state inspection, fan-out feasibility analysis (`FAN-OUT READY` / `HYBRID` / `SEQUENTIAL ONLY` / `BATCH RESUME`), and copy-ready prompt generation |
-| Fable | `carapace-fable` | Hardest logic/concurrency, bugs that survived Heavy investigation, or explicitly requested targeted design features |
-| Heavy | `carapace-heavy` | Unfamiliar/messy code, unclear root cause, complex cross-cutting architecture |
-| Careful | `carapace-careful` | Delicate refactors, invariant-heavy fixes, multi-step per-app audit `apply` branches with strict proof and ownership rules |
-| Medium | `carapace-medium` | Standard feature steps, well-scoped `app-slop-audit` screen/module fixes |
-| Light | `carapace-light` | Mechanical edits, config/lint rules, boilerplate, running verification suites |
+| Role | Agent | Default `effort` | Use for |
+|------|-------|------------------|---------|
+| Advisor | `carapace-advisor` | `medium` | Read-only repo state inspection, fan-out feasibility analysis (`FAN-OUT READY` / `HYBRID` / `SEQUENTIAL ONLY` / `BATCH RESUME`), and copy-ready prompt generation |
+| Fable | `carapace-fable` | `max` | Hardest logic/concurrency, bugs that survived Heavy investigation, or explicitly requested targeted design features |
+| Heavy | `carapace-heavy` | `xhigh` | Unfamiliar/messy code, unclear root cause, complex cross-cutting architecture |
+| Careful | `carapace-careful` | `high` | Delicate refactors, invariant-heavy fixes, multi-step per-app audit `apply` branches with strict proof and ownership rules |
+| Medium | `carapace-medium` | `medium` | Standard feature steps, well-scoped `app-slop-audit` screen/module fixes |
+| Light | `carapace-light` | `low` | Mechanical edits, config/lint rules, boilerplate, running verification suites |
 
 ### 4A. Single-Task Execution (`NOW` is a single task row)
 
@@ -45,7 +46,7 @@ When working through the plan one task at a time:
 1. **Identify `NOW`**: Read the single `NOW` row in the canonical register, its requirement sources, and (if it is an `app-slop-audit` step) the accepted findings it closes.
 2. **Delegate**:
    - Update `mcp__carapace__progress` (`phase: "delegate"`, `title`, `total`, `done`, `tasks`).
-   - Spawn the chosen `carapace-*` worker through the harness's delegation tool: Claude Code `Agent` in the **foreground** (`run_in_background` omitted or `false`, `description` = the task's `title`, no `model` parameter); OpenCode `subagent` (`agent` ID = worker name, `description` = the task's `title`, complete `prompt`), whose result you review when it reports idle. Never pass a model override in any harness. Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, required falsification/proofs, and verification commands.
+   - Spawn the chosen `carapace-*` worker through the harness's delegation tool: Claude Code `Agent` in the **foreground** (`run_in_background` omitted or `false`, `description` = the task's `title`, `effort` = `agents.tiers.<tier>.effort` from `status.mjs --json`, no `model` parameter); OpenCode `subagent` (`agent` ID = worker name, `description` = the task's `title`, complete `prompt`), whose result you review when it reports idle. Never pass a model override in any harness, and never guess `effort` ad-hoc (`effort` applies only in Claude Code; Codex, Cursor, and OpenCode ignore `effort`). Give it a tight, self-contained brief: exact task ID, files/scope, design-authority rules, settled audit principles from `status.mjs --json`, `agents.packageManager` (when set) and `agents.extraRules` (when non-empty), required falsification/proofs, and verification commands.
    - Instruct the worker **not** to edit the canonical execution register document; the orchestrator updates the register after review.
 3. **Adversarial Review & Semantic Close (`execution-plan-integrity` `close` + `app-slop-audit` `apply`)**:
    - Switch `mcp__carapace__progress` `phase` to `"review"`.
@@ -82,12 +83,12 @@ Never form a batch unless the maintainer directs it. When the maintainer directs
 3. **Create and prepare worktrees**:
    - For each worker slice in the batch:
      `git worktree add -b <branch> <worktree> <commit>`
-   - Install dependencies in each worktree as the project requires (`pnpm install`), and copy any ignored local environment files (`cp`) without reading or printing their contents.
+   - Install dependencies in each worktree as the project requires (honoring `agents.packageManager` from `status.mjs --json`, or the repository's existing lockfile/instructions when unset), and copy any ignored local environment files (`cp`) without reading or printing their contents.
 4. **Update `mcp__carapace__progress` (and `TodoWrite` if requested) & spawn `carapace-*` workers**:
    - Call `mcp__carapace__progress` with `title` (the batch ID/name), `total` (number of worker slices or batch members), `done` (already-closed members), `phase: "delegate"`, and `tasks` (one entry per worker/member, matching the delegation `description`).
-   - Launch one `carapace-*` worker per slice concurrently in a single message in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll with `sleep` loops; **omit `model` on every spawn**). Each worker brief must state:
+   - Launch one `carapace-*` worker per slice concurrently in a single message in the **foreground** (`run_in_background` omitted or `false` — never spawn background workers and poll with `sleep` loops; **omit `model` on every spawn**; in Claude Code pass `effort` = `agents.tiers.<tier>.effort` from `status.mjs --json`, never guessed ad-hoc; Codex, Cursor, and OpenCode ignore `effort`). Each worker brief must state:
      - Its slice/app name, `worktree` path, `branch`, exact owned `paths` (folders or individual files), and ordered member task IDs (`<STEP-ID>`) with their full register rows;
-     - The committed audit `toolkit` path, settled audit principles, and the shared-code paths it must not modify;
+     - The committed audit `toolkit` path, settled audit principles, `agents.packageManager` (when set), `agents.extraRules` (when non-empty), and the shared-code paths it must not modify;
      - The serialized command queue: every command that installs, builds, tests, serves, or measures must run via:
        `node <carapace-skill-path>/../app-slop-audit/assets/fanout/fanout.mjs run -- <command>`
      - **Per-step worker obligations in the worktree**:

@@ -1,5 +1,11 @@
 import { isAbsolute, normalize, resolve, sep } from 'node:path'
-import { CAPABILITY_KEYS, CAPABILITY_PROFILES } from '../../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
+import {
+  AGENT_EFFORT_LEVELS,
+  AGENT_TIERS,
+  CAPABILITY_KEYS,
+  CAPABILITY_PROFILES,
+  DEFAULT_AGENT_EFFORTS,
+} from '../../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
 
 const DEFAULT_CONFIG = '.execution-plan-integrity.json'
 const DEFAULT_PROOF_DIR = 'docs/execution-proofs'
@@ -123,6 +129,36 @@ export function resolveCapabilities(config, appProfile = {}, gitState = {}) {
     }
   }
   return { profile, profileSource: config?.profile ? 'config' : 'default', values, drift }
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function resolveAgents(config) {
+  const rawAgents = isPlainObject(config?.agents) ? config.agents : {}
+  const rawTiers = isPlainObject(rawAgents.tiers) ? rawAgents.tiers : {}
+  const tiers = {}
+  for (const tier of AGENT_TIERS) {
+    const entry = isPlainObject(rawTiers[tier]) ? rawTiers[tier] : null
+    const effort =
+      typeof entry?.effort === 'string' && AGENT_EFFORT_LEVELS.includes(entry.effort)
+        ? entry.effort
+        : null
+    tiers[tier] = effort
+      ? { effort, source: 'config' }
+      : { effort: DEFAULT_AGENT_EFFORTS[tier], source: 'default' }
+  }
+  const rawPm = typeof rawAgents.packageManager === 'string' ? rawAgents.packageManager.trim() : ''
+  const packageManager = rawPm.length > 0 ? rawPm : null
+  const packageManagerSource = packageManager ? 'config' : 'default'
+  const extraRules = Array.isArray(rawAgents.extraRules)
+    ? rawAgents.extraRules
+        .filter((rule) => typeof rule === 'string')
+        .map((rule) => rule.trim())
+        .filter(Boolean)
+    : []
+  return { tiers, packageManager, packageManagerSource, extraRules }
 }
 
 export { DEFAULT_CONFIG, DEFAULT_PROOF_DIR, BAR_CELLS, USAGE, safeRelative }

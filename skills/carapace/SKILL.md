@@ -28,14 +28,15 @@ Task from the user: $ARGUMENTS
 3. **Git and secret safety**:
    - Read repository state (`git status`) before any state-dependent command.
    - Commit, branch, merge, or manage worktrees **only** when explicitly authorized by the user or the repository's instructions. Never fetch, pull, or push unless explicitly asked. Never add `Co-Authored-By` or AI attribution trailers.
-   - Always use `pnpm` (never `npm` or `yarn`).
+   - Honor `agents.packageManager` from `status.mjs --json` when set; when unset (`null`), follow the repository's existing lockfile or instructions rather than assuming a hardcoded package manager.
    - Never read, print, hash, or inspect `.env*`, `.npmrc`, or secret values. When preparing a worktree that needs ignored local env files, copy them with `cp` without reading or printing their contents.
    - Kill any dev server, watcher, or background process you started the moment its check returns.
 4. **Worker and advisor availability**:
    - Subagents must exist: `carapace-advisor` (read-only state researcher, fan-out feasibility analyzer, and prompt generator) and the five execution workers `carapace-fable`, `carapace-heavy`, `carapace-careful`, `carapace-medium`, `carapace-light` (namespaced as `carapace:carapace-*` in Claude Code; plain `carapace-*` IDs in OpenCode, Codex, and Cursor).
-5. **Model inheritance (`D-MODEL-INHERIT`)**:
+5. **Model inheritance (`D-MODEL-INHERIT`) and config-driven `effort`**:
    - Every `carapace:*` advisor/worker runs on **exactly the orchestrator session's live model** (`default` / `auto` / whatever the maintainer selected). Claude Code agent defs keep `model: inherit`.
    - **Never pass a model override** on a `carapace:*` spawn. In Claude Code, call `Agent` and omit its `model` parameter entirely — never pass `sonnet`, `opus`, `haiku`, `fable`, `inherit`, or any other override, because those pins break inheritance and `inherit` is not even a valid Agent `model` enum value. In OpenCode, call the `subagent` tool (agent ID, `description`, full `prompt`) with no model field: OpenCode subagents inherit the parent session model. In Codex and Cursor, use the harness's native delegation with no model override.
+   - **Config-driven `effort` (Claude Code only) & worker conventions (all harnesses)**: In Claude Code, pass `effort` from `status.mjs --json` (`agents.tiers.<tier>.effort`) on every `carapace:*` `Agent` spawn across all six tiers (`advisor`, `light`, `medium`, `careful`, `heavy`, `fable`) — never guess `effort` ad-hoc. Across all harnesses (Claude Code, Codex, Cursor, OpenCode), inject `agents.packageManager` (when set) and `agents.extraRules` (when non-empty) into delegated worker briefs; `effort` applies only in Claude Code, while Codex, Cursor, and OpenCode ignore `effort` and still receive `packageManager` and `extraRules`. See `references/agents.md`.
    - Only the orchestrator spawns `carapace:*` agents. Workers cannot re-delegate: Claude Code workers' `tools:` allowlists exclude `Agent`; OpenCode workers carry a `subagent: deny` permission; Codex and Cursor rely on this prompt rule.
 
 ## Live view (progress tools, harness checklists, & `status.mjs`)
@@ -66,7 +67,7 @@ node <carapace-skill-path>/assets/status.mjs --root <repo> --json [--prompt "<$A
 
 ### Form 1: Bare `/carapace` — Interactive Control Menu & Advisor
 When `$ARGUMENTS` is empty (or asks what to do next / asks for a prompt or fan-out analysis without authorizing immediate execution):
-1. Inspect the JSON output from `status.mjs --root <repo> --json`. **When the user asks for `advise`, `prompt`, a fan-out feasibility analysis, or a copy-ready orchestration prompt, always spawn `carapace-advisor` (`carapace:carapace-advisor` in Claude Code, plain `carapace-advisor` elsewhere)** to inspect cross-file path overlap, shared prerequisites, and worktree readiness and generate the orchestration prompt.
+1. Inspect the JSON output from `status.mjs --root <repo> --json`. **When the user asks for `advise`, `prompt`, a fan-out feasibility analysis, or a copy-ready orchestration prompt, always spawn `carapace-advisor` (`carapace:carapace-advisor` in Claude Code with `effort` from `agents.tiers.advisor.effort` and `model` omitted; plain `carapace-advisor` elsewhere)** to inspect cross-file path overlap, shared prerequisites, and worktree readiness and generate the orchestration prompt.
 2. Present:
    - **Live State Snapshot**: Progress bar, `NOW` pointer, any interrupted step or active worktrees on disk, and any unreconciled or undecided `docs/audit/` rounds.
    - **Numbered Options Menu**: List the tailored `options` from `status.mjs --json`, always placing the recommended action first as **`1. ... (Recommended)`** with its exact command (`command`).
@@ -93,7 +94,7 @@ When `$ARGUMENTS` contains any instruction (either natural language like `/carap
 ### Delegation mechanics in every harness
 
 - In Claude Code, spawn workers in the **foreground** so review and close happen in the same turn. OpenCode subagents always run in the background: spawn with the `subagent` tool (`agent` ID, `description` = task title, complete `prompt`), keep working, and review the result when the child reports idle. Codex and Cursor follow their harness's delegation behavior.
-- Claude Code `Agent` in the **foreground** (`run_in_background` omitted or `false`, `description` = the task's `title`, no `model` parameter); OpenCode uses the `subagent` tool. Never pass a model override in any harness.
+- Claude Code `Agent` in the **foreground** (`run_in_background` omitted or `false`, `description` = the task's `title`, `effort` = `agents.tiers.<tier>.effort` from `status.mjs --json`, no `model` parameter); OpenCode uses the `subagent` tool. Never pass a model override in any harness, and inject `agents.packageManager` (when set) and `agents.extraRules` (when non-empty) into every worker brief across all harnesses (`effort` applies only in Claude Code; Codex, Cursor, and OpenCode ignore `effort`).
 
 ## Mode workflows and capability scope
 
@@ -105,6 +106,7 @@ The root playbook, its invariants, entry dispatch, and harness rules always appl
 - `run <ID>` (single task, or a maintainer-directed parallel batch) -> `references/run.md`
 - locking a ticket's requirements and its frozen REQ IDs -> `references/requirements.md`
 - project type and opted-in capabilities -> `references/capabilities.md`
+- per-tier agent efforts, package manager, and extra worker rules -> `references/agents.md`
 
 ## 5. Close & Next Step Suggestion
 

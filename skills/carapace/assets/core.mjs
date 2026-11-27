@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { runChecks } from '../../app-slop-audit/assets/checker/check-records.mjs'
 import { CANONICAL_PLAN_PATH, checkExecutionProject, readConfigObject } from '../../execution-plan-integrity/assets/checker/check-execution-plan.mjs'
-import { DEFAULT_CONFIG, DEFAULT_PROOF_DIR, resolveCapabilities, safeRelative } from './config.mjs'
+import { DEFAULT_CONFIG, DEFAULT_PROOF_DIR, resolveAgents, resolveCapabilities, safeRelative } from './config.mjs'
 import { renderBar } from './render.mjs'
 import { parseRegisterStatus } from './register.mjs'
 import { inspectAuditState } from './audit.mjs'
@@ -59,6 +59,7 @@ export function readCarapaceStatus({
           changedFields: [],
         },
       },
+      agents: resolveAgents({}),
       requirements: emptyRequirements(),
     }
     const { stage, options } = buildStageAndOptions(base)
@@ -69,6 +70,7 @@ export function readCarapaceStatus({
   const config = readConfigObject(root, relConfig)
   const capabilities = resolveCapabilities(config, appProfile)
   capabilities.uncommittedChange = detectUncommittedCapabilityChange(root, relConfig, config, gitState)
+  const agents = resolveAgents(config)
   const canonical = safeRelative(config?.canonical)
   if (!canonical) throw new Error(`Invalid canonical path in ${relConfig}`)
   const legacyCanonical = canonical !== CANONICAL_PLAN_PATH ? canonical : null
@@ -92,6 +94,7 @@ export function readCarapaceStatus({
       appProfile: detectedAppProfile,
       gitState,
       capabilities,
+      agents,
       requirements: emptyRequirements(),
     }
     const { stage, options } = buildStageAndOptions(base)
@@ -115,6 +118,7 @@ export function readCarapaceStatus({
     appProfile: detectedAppProfile,
     gitState,
     capabilities,
+    agents,
     requirements: readRequirementsBrief({
       root,
       roles: config?.roles ?? {},
