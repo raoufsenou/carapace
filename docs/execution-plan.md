@@ -28,7 +28,7 @@ Canonical execution register for the `carapace` plugin.
 
 <!-- execution-register:start -->
 
-`NOW`: `RW-DOGFOOD-CLOSE`
+`NOW`: `NONE`
 
 | Order | ID | Kind | State | Work and completion boundary | Source or evidence |
 | ---: | --- | --- | --- | --- | --- |
@@ -44,6 +44,6 @@ Canonical execution register for the `carapace` plugin.
 | 10 | `RW-PREFLIGHT-CORE` | `IMPLEMENTATION` | `DONE` | Hardened `skills/carapace/assets/prompt.mjs` (bypassable "proceed without" commands, bare `/carapace audit` capability gating, token-bounded parallel/audit/devServer keywords, `parallel-not-ready` under `sequential`/`idle`, `IDLE`/`NONE` guards, bare task-ID requirement checks, anchored lifecycle matching), `skills/carapace/assets/core.mjs` (pre-canonical capabilities preservation and synchronized `" (Recommended)"` fallback labels), and `skills/carapace/assets/audit.mjs` (escaped `target` RegExp, per-row/per-audit sibling-isolated `trackedInRegister`, removed unused `runChecks` import) with unit tests. | Completed 2026-11-26; `docs/execution-proofs/RW-PREFLIGHT-CORE.json`. |
 | 11 | `RW-HOOKS-INSTALL` | `IMPLEMENTATION` | `DONE` | Hardened `hooks/register.tsx` (`syncRegister` JSONC comment stripping/parsing, `lastSuggestedText` reset on new flow, clearing `panel.registerPrompt` when `nextPrompt` is omitted) and `scripts/install.mjs` (`toOpenCodeAgents` failing loudly before disk writes when any `OPENCODE_BODY_REPLACEMENTS` entry matches zero times across the agent set) with hook and temp-dir installer tests. | Completed 2026-11-27; `docs/execution-proofs/RW-HOOKS-INSTALL.json`. |
 | 12 | `RW-SCHEMA-CAP` | `IMPLEMENTATION` | `DONE` | Published `skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json` matching `check-execution-plan.mjs` and registered its SHA-256 in `artifact.mjs`, expanded `app-profile.mjs` and `config.mjs` drift checks across all five capabilities, updated `references/setup.md` and `references/capabilities.md` for opt-in profile proposals without silent writes, and added stateless `git diff` active-run capability-change conflict detection in `git.mjs`/`core.mjs`/`prompt.mjs` with schema, reference, drift, and temp-git-repo tests. | Completed 2026-11-27; `docs/execution-proofs/RW-SCHEMA-CAP.json`. |
-| 13 | `RW-DOGFOOD-CLOSE` | `VALIDATION` | `NOW` | Configure Carapace's `.execution-plan-integrity.json` profile to eliminate UI drift, run end-to-end fixture verification (`docs-only`, `backend`, `fullstack`, `--no-yolo`, `after-now`, JSONC), and verify `status.mjs --root . --check` and the unified verification command pass (live harness install/replace stays manual per maintainer direction). Closes when all checks and fixtures pass with zero drift. | `D-REWORK-HARDENING` REQ-RW-14. |
+| 13 | `RW-DOGFOOD-CLOSE` | `VALIDATION` | `DONE` | Configured Carapace's `.execution-plan-integrity.json` with `$schema` and `"profile": "backend"` (0 drift), added end-to-end CLI fixture validation in `skills/carapace/assets/status.test.mjs` covering dogfood root, `docs-only`, `backend`, `fullstack`, `--no-yolo`, `after-now`, and JSONC, and verified `status.mjs --root . --check` and `node scripts/verify.mjs` pass (live harness install/replace stays manual). | Completed 2026-11-27; `docs/execution-proofs/RW-DOGFOOD-CLOSE.json`. |
 
 <!-- execution-register:end -->

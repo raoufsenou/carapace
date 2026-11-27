@@ -20,6 +20,7 @@ import { readRequirementsBrief, targetTaskId, targetTaskIds } from './requiremen
 
 const CLI = join(dirname(fileURLToPath(import.meta.url)), 'status.mjs')
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
+const CHECKER_CLI = join(REPO_ROOT, 'skills/execution-plan-integrity/assets/checker/check-execution-plan.mjs')
 const roots = []
 
 afterEach(() => {
@@ -2104,4 +2105,560 @@ test('stateless git diff detects uncommitted capability changes while NOW is act
       `uncommitted-capability-change must not fire when NOW is ${pointer}`,
     )
   }
+})
+
+test('end-to-end CLI fixture validation covers dogfood root, docs-only, backend, fullstack, --no-yolo, after-now, and JSONC (REQ-RW-14)', () => {
+  const SCHEMA_REF = './skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json'
+  const CAPABILITY_NAMES = ['uiAudit', 'nonUiAudit', 'fanoutWorktrees', 'devServer', 'testGates']
+
+  const runCli = (script, args) => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' })
+  const runStatusJson = (root, extraArgs = []) => {
+    const run = runCli(CLI, ['--root', root, '--json', ...extraArgs])
+    assert.equal(run.status, 0, `status.mjs ${extraArgs.join(' ')} failed: ${run.stderr}`)
+    return JSON.parse(run.stdout)
+  }
+  const git = (root, ...args) => {
+    const run = spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+    assert.equal(run.status, 0, `git ${args.join(' ')} failed: ${run.stderr}`)
+    return run.stdout
+  }
+  const initGitRepo = (root) => {
+    git(root, 'init', '-b', 'main')
+    git(root, 'config', 'user.name', 'Carapace Test')
+    git(root, 'config', 'user.email', 'test@carapace.local')
+    git(root, 'config', 'commit.gpgsign', 'false')
+    git(root, 'config', 'core.hooksPath', '/dev/null')
+  }
+  const commitAll = (root, message) => {
+    git(root, 'add', '.')
+    git(root, 'commit', '-m', message)
+  }
+  const configJson = (profile) =>
+    `${JSON.stringify(
+      {
+        $schema: SCHEMA_REF,
+        schema: 2,
+        canonical: 'docs/execution-plan.md',
+        profile,
+        completionProofs: { directory: 'docs/execution-proofs' },
+        requiredGlobs: ['docs/**/*plan*.md', 'docs/**/*audit*.md'],
+        roles: {
+          evidence: ['docs/**/*audit*.md'],
+          validation: ['docs/**/*validation*.md'],
+          design: ['docs/**/*design*.md'],
+          archive: ['docs/archive/**/*.md'],
+        },
+      },
+      null,
+      2,
+    )}\n`
+  const planDoc = (now, rows) =>
+    [
+      '<!-- execution-role: canonical -->',
+      '# Execution Plan',
+      '',
+      '<!-- execution-register:start -->',
+      `\`NOW\`: \`${now}\``,
+      '',
+      '| Order | ID | Kind | State | Work and completion boundary | Source or evidence |',
+      '| ---: | --- | --- | --- | --- | --- |',
+      ...rows,
+      '<!-- execution-register:end -->',
+      '',
+    ].join('\n')
+  const designDoc = (taskIds, reqs) =>
+    [
+      '<!-- execution-role: design -->',
+      '# Design Authority',
+      '',
+      'Locked 2026-11-26.',
+      `This is the authority for ${taskIds.map((id) => `\`${id}\``).join(', ')}.`,
+      '',
+      ...reqs.map(([id, statement]) => `### ${id} — ${statement}`),
+      '',
+    ].join('\n')
+  const implProof = ({ taskId, reqId, sourcePath, sourceAnchor, implPath, symbol, consumerPath }) =>
+    `${JSON.stringify(
+      {
+        schema: 1,
+        taskId,
+        taskKind: 'IMPLEMENTATION',
+        outcome: 'IMPLEMENTED',
+        completedAt: '2026-11-26',
+        requirements: [
+          {
+            id: reqId,
+            statement: `${taskId} behavior holds.`,
+            source: { path: sourcePath, anchor: sourceAnchor },
+            evidence: [{ path: implPath, symbol }],
+            verification: [
+              {
+                kind: 'test',
+                command: 'node --test',
+                result: 'passed',
+                checkedAt: '2026-11-26',
+              },
+            ],
+          },
+        ],
+        implementationLedger: implPath === consumerPath ? [implPath] : [implPath, consumerPath],
+        integration: [
+          {
+            entryPoint: `${symbol}()`,
+            implementation: `${implPath}#${symbol}`,
+            consumer: consumerPath,
+          },
+        ],
+        falsification: [
+          {
+            assertion: `Removing ${symbol} breaks verification.`,
+            kind: 'mutation',
+            evidence: 'Verified in fixture check.',
+            result: 'passed',
+          },
+        ],
+        implementationDisposition: { status: 'DELIVERED' },
+        unverified: [],
+        outOfScope: [],
+      },
+      null,
+      2,
+    )}\n`
+  const docProof = ({ taskId, reqId, sourcePath, sourceAnchor, docPath, symbol }) =>
+    `${JSON.stringify(
+      {
+        schema: 1,
+        taskId,
+        taskKind: 'DOCUMENTATION',
+        outcome: 'DOCUMENTED',
+        completedAt: '2026-11-26',
+        requirements: [
+          {
+            id: reqId,
+            statement: `${taskId} documentation holds.`,
+            source: { path: sourcePath, anchor: sourceAnchor },
+            evidence: [{ path: docPath, symbol }],
+            verification: [
+              {
+                kind: 'inspection',
+                evidence: `Inspected ${docPath}.`,
+                result: 'passed',
+                checkedAt: '2026-11-26',
+              },
+            ],
+          },
+        ],
+        implementationDisposition: {
+          status: 'NOT-REQUIRED',
+          reason: 'Documentation-only repository.',
+          source: { path: sourcePath, anchor: sourceAnchor },
+        },
+        unverified: [],
+        outOfScope: [],
+      },
+      null,
+      2,
+    )}\n`
+
+  const dogfood = runStatusJson(REPO_ROOT)
+  assert.equal(dogfood.capabilities.profile, 'backend')
+  assert.equal(dogfood.capabilities.profileSource, 'config')
+  assert.deepEqual(dogfood.capabilities.drift, [])
+  assert.equal(dogfood.appProfile.suggestedProfile, 'backend')
+  assert.equal(dogfood.capabilities.values.uiAudit.enabled, false)
+  assert.equal(dogfood.capabilities.values.devServer.enabled, false)
+  assert.equal(dogfood.capabilities.values.nonUiAudit.enabled, true)
+  assert.equal(dogfood.capabilities.values.fanoutWorktrees.enabled, true)
+  assert.equal(dogfood.capabilities.values.testGates.enabled, true)
+
+  const docsRoot = tempRepo()
+  initGitRepo(docsRoot)
+  write(docsRoot, 'README.md', '# Docs Handbook\n')
+  write(docsRoot, '.execution-plan-integrity.json', configJson('docs-only'))
+  write(
+    docsRoot,
+    'docs/docs-design.md',
+    designDoc(['DOC-0', 'DOC-1'], [
+      ['REQ-DOC-0', 'Handbook exists'],
+      ['REQ-DOC-1', 'Onboarding guide covers setup'],
+    ]),
+  )
+  write(
+    docsRoot,
+    'docs/execution-plan.md',
+    planDoc('DOC-1', [
+      '| 1 | `DOC-0` | `DOCUMENTATION` | `DONE` | Published handbook. | Completed 2026-11-26; docs/execution-proofs/DOC-0.json. |',
+      '| 2 | `DOC-1` | `DOCUMENTATION` | `NOW` | Write onboarding guide in docs/onboarding.md. | docs/docs-design.md |',
+    ]),
+  )
+  write(
+    docsRoot,
+    'docs/execution-proofs/DOC-0.json',
+    docProof({
+      taskId: 'DOC-0',
+      reqId: 'REQ-DOC-0',
+      sourcePath: 'docs/docs-design.md',
+      sourceAnchor: 'REQ-DOC-0',
+      docPath: 'README.md',
+      symbol: '# Docs Handbook',
+    }),
+  )
+  commitAll(docsRoot, 'init docs-only fixture')
+
+  assert.equal(runCli(CHECKER_CLI, ['--root', docsRoot]).status, 0)
+  assert.equal(runCli(CLI, ['--root', docsRoot, '--check']).status, 0)
+  const docsStatus = runStatusJson(docsRoot)
+  assert.equal(docsStatus.appProfile.suggestedProfile, 'docs-only')
+  assert.equal(docsStatus.capabilities.profile, 'docs-only')
+  assert.deepEqual(docsStatus.capabilities.drift, [])
+  for (const key of CAPABILITY_NAMES) {
+    assert.equal(docsStatus.capabilities.values[key].enabled, false, `docs-only ${key} must be disabled`)
+  }
+  const docsAudit = runStatusJson(docsRoot, ['--prompt', 'audit'])
+  const docsAuditConflict = docsAudit.preflight.conflicts.find((c) => c.kind === 'capability-disabled')
+  assert.ok(docsAuditConflict)
+  assert.match(docsAuditConflict.message, /capabilities\.uiAudit/)
+  assert.match(docsAuditConflict.message, /capabilities\.nonUiAudit/)
+  const docsAuditBypass = runStatusJson(docsRoot, ['--prompt', docsAuditConflict.options[1].command])
+  assert.equal(docsAuditBypass.preflight.conflicts.some((c) => c.kind === 'capability-disabled'), false)
+  const docsUiAudit = runStatusJson(docsRoot, ['--prompt', 'audit screens and UI'])
+  const docsUiConflict = docsUiAudit.preflight.conflicts.find((c) => c.kind === 'capability-disabled')
+  assert.ok(docsUiConflict)
+  assert.match(docsUiConflict.message, /capabilities\.uiAudit/)
+  const docsParallel = runStatusJson(docsRoot, ['--prompt', 'run in parallel'])
+  const docsParallelConflict = docsParallel.preflight.conflicts.find((c) => c.kind === 'capability-disabled')
+  assert.ok(docsParallelConflict)
+  assert.match(docsParallelConflict.message, /capabilities\.fanoutWorktrees/)
+  const docsRun = runStatusJson(docsRoot, ['--prompt', 'run DOC-1'])
+  assert.deepEqual(docsRun.preflight.conflicts, [])
+  assert.equal(docsRun.requirements.status, 'LOCKED')
+
+  const backendRoot = tempRepo()
+  initGitRepo(backendRoot)
+  write(
+    backendRoot,
+    'package.json',
+    JSON.stringify({
+      name: 'backend-fixture',
+      scripts: { dev: 'node src/server.mjs', test: 'node --test' },
+    }),
+  )
+  write(backendRoot, 'src/server.mjs', 'export const startServer = () => true\n')
+  write(backendRoot, 'test/server.test.mjs', "import assert from 'node:assert/strict'\nassert.equal(true, true)\n")
+  write(backendRoot, '.execution-plan-integrity.json', configJson('backend'))
+  write(
+    backendRoot,
+    'docs/backend-design.md',
+    designDoc(['BE-0', 'BE-1'], [
+      ['REQ-BE-0', 'Server boots'],
+      ['REQ-BE-1', 'Health route responds'],
+    ]),
+  )
+  write(
+    backendRoot,
+    'docs/execution-plan.md',
+    planDoc('BE-1', [
+      '| 1 | `BE-0` | `IMPLEMENTATION` | `DONE` | Bootstrapped server. | Completed 2026-11-26; docs/execution-proofs/BE-0.json. |',
+      '| 2 | `BE-1` | `IMPLEMENTATION` | `NOW` | Add health route in src/server.mjs. | docs/backend-design.md |',
+    ]),
+  )
+  write(
+    backendRoot,
+    'docs/execution-proofs/BE-0.json',
+    implProof({
+      taskId: 'BE-0',
+      reqId: 'REQ-BE-0',
+      sourcePath: 'docs/backend-design.md',
+      sourceAnchor: 'REQ-BE-0',
+      implPath: 'src/server.mjs',
+      symbol: 'startServer',
+      consumerPath: 'test/server.test.mjs',
+    }),
+  )
+  commitAll(backendRoot, 'init backend fixture')
+
+  assert.equal(runCli(CLI, ['--root', backendRoot, '--check']).status, 0)
+  const backendStatus = runStatusJson(backendRoot)
+  assert.equal(backendStatus.appProfile.suggestedProfile, 'backend')
+  assert.equal(backendStatus.capabilities.profile, 'backend')
+  assert.deepEqual(backendStatus.capabilities.drift, [])
+  assert.deepEqual(runStatusJson(backendRoot, ['--prompt', 'audit']).preflight.conflicts, [])
+  const backendUiConflict = runStatusJson(backendRoot, ['--prompt', 'audit screens and UI']).preflight.conflicts.find(
+    (c) => c.kind === 'capability-disabled',
+  )
+  assert.ok(backendUiConflict)
+  assert.match(backendUiConflict.message, /capabilities\.uiAudit/)
+  const backendDevConflict = runStatusJson(backendRoot, ['--prompt', 'start dev server']).preflight.conflicts.find(
+    (c) => c.kind === 'capability-disabled',
+  )
+  assert.ok(backendDevConflict)
+  assert.match(backendDevConflict.message, /capabilities\.devServer/)
+
+  const fullstackRoot = tempRepo()
+  initGitRepo(fullstackRoot)
+  write(
+    fullstackRoot,
+    'apps/web/package.json',
+    JSON.stringify({
+      name: 'web',
+      dependencies: { react: '^19.0.0' },
+      devDependencies: { vite: '^6.0.0' },
+      scripts: { dev: 'vite', test: 'vitest run' },
+    }),
+  )
+  write(fullstackRoot, 'apps/web/src/App.tsx', 'export const App = () => null\n')
+  write(
+    fullstackRoot,
+    'apps/api/package.json',
+    JSON.stringify({
+      name: 'api',
+      dependencies: { express: '^5.0.0' },
+      scripts: { test: 'node --test' },
+    }),
+  )
+  write(fullstackRoot, 'apps/api/src/index.mjs', 'export const apiHandler = () => true\n')
+  write(fullstackRoot, '.execution-plan-integrity.json', configJson('fullstack'))
+  write(
+    fullstackRoot,
+    'docs/web-design.md',
+    designDoc(['FS-0', 'WEB-1'], [
+      ['REQ-FS-0', 'Base apps exist'],
+      ['REQ-WEB-1', 'Web header aligns'],
+    ]),
+  )
+  write(fullstackRoot, 'docs/api-design.md', designDoc(['API-1'], [['REQ-API-1', 'API returns health']]))
+  write(
+    fullstackRoot,
+    'docs/execution-plan.md',
+    planDoc('WEB-1', [
+      '| 1 | `FS-0` | `IMPLEMENTATION` | `DONE` | Bootstrapped monorepo. | Completed 2026-11-26; docs/execution-proofs/FS-0.json. |',
+      '| 2 | `WEB-1` | `IMPLEMENTATION` | `NOW` | Update apps/web/src/App.tsx header. | docs/web-design.md |',
+      '| 3 | `API-1` | `IMPLEMENTATION` | `QUEUED` | Add health check in apps/api/src/index.mjs. | docs/api-design.md |',
+    ]),
+  )
+  write(
+    fullstackRoot,
+    'docs/execution-proofs/FS-0.json',
+    implProof({
+      taskId: 'FS-0',
+      reqId: 'REQ-FS-0',
+      sourcePath: 'docs/web-design.md',
+      sourceAnchor: 'REQ-FS-0',
+      implPath: 'apps/api/src/index.mjs',
+      symbol: 'apiHandler',
+      consumerPath: 'apps/web/src/App.tsx',
+    }),
+  )
+  commitAll(fullstackRoot, 'init fullstack fixture')
+
+  assert.equal(runCli(CLI, ['--root', fullstackRoot, '--check']).status, 0)
+  const fullstackStatus = runStatusJson(fullstackRoot)
+  assert.equal(fullstackStatus.appProfile.suggestedProfile, 'fullstack')
+  assert.equal(fullstackStatus.capabilities.profile, 'fullstack')
+  assert.deepEqual(fullstackStatus.capabilities.drift, [])
+  assert.equal(fullstackStatus.fanoutAnalysis.mode, 'parallel-ready')
+  assert.deepEqual(fullstackStatus.fanoutAnalysis.parallelIds, ['WEB-1', 'API-1'])
+  assert.equal(fullstackStatus.nextPrompt, '/carapace run WEB-1 API-1 in parallel')
+  const fullstackParallel = runStatusJson(fullstackRoot, ['--prompt', 'run WEB-1 API-1 in parallel'])
+  assert.deepEqual(fullstackParallel.preflight.conflicts, [])
+  assert.equal(fullstackParallel.requirements.status, 'LOCKED')
+
+  write(fullstackRoot, '.execution-plan-integrity.json', configJson('backend'))
+  const fullstackDirty = runStatusJson(fullstackRoot, ['--prompt', 'run WEB-1'])
+  assert.ok(fullstackDirty.preflight.conflicts.some((c) => c.kind === 'uncommitted-capability-change'))
+  assert.deepEqual(runStatusJson(fullstackRoot, ['--prompt', 'verify']).preflight.conflicts, [])
+  assert.deepEqual(
+    git(fullstackRoot, 'status', '--porcelain')
+      .split(/\r?\n/)
+      .filter(Boolean),
+    [' M .execution-plan-integrity.json'],
+  )
+  write(fullstackRoot, '.execution-plan-integrity.json', configJson('fullstack'))
+  const fullstackReverted = runStatusJson(fullstackRoot, ['--prompt', 'run WEB-1'])
+  assert.equal(fullstackReverted.capabilities.uncommittedChange.changed, false)
+  assert.deepEqual(fullstackReverted.preflight.conflicts, [])
+
+  const noYoloRoot = tempRepo()
+  initGitRepo(noYoloRoot)
+  write(noYoloRoot, 'package.json', JSON.stringify({ name: 'no-yolo-fixture', scripts: { test: 'node --test' } }))
+  write(noYoloRoot, 'src/index.mjs', 'export const nyBase = () => true\n')
+  write(noYoloRoot, 'test/index.test.mjs', "import assert from 'node:assert/strict'\nassert.equal(true, true)\n")
+  write(noYoloRoot, '.execution-plan-integrity.json', configJson('backend'))
+  write(
+    noYoloRoot,
+    'docs/execution-plan.md',
+    planDoc('NY-1', [
+      '| 1 | `NY-0` | `IMPLEMENTATION` | `DONE` | Bootstrapped fixture. | Completed 2026-11-26; docs/execution-proofs/NY-0.json. |',
+      '| 2 | `NY-1` | `IMPLEMENTATION` | `NOW` | Implement strict gate in src/index.mjs. | Plan |',
+    ]),
+  )
+  write(
+    noYoloRoot,
+    'docs/execution-proofs/NY-0.json',
+    implProof({
+      taskId: 'NY-0',
+      reqId: 'REQ-NY-0',
+      sourcePath: 'docs/execution-plan.md',
+      sourceAnchor: 'NY-0',
+      implPath: 'src/index.mjs',
+      symbol: 'nyBase',
+      consumerPath: 'test/index.test.mjs',
+    }),
+  )
+  commitAll(noYoloRoot, 'init --no-yolo fixture')
+
+  const nyDefault = runStatusJson(noYoloRoot, ['--prompt', 'run NY-1'])
+  assert.equal(nyDefault.gate.yolo, true)
+  assert.equal(nyDefault.preflight.hasConflict, false)
+  assert.ok(nyDefault.preflight.warnings.some((w) => w.kind === 'requirements-not-locked'))
+
+  for (const prompt of ['run NY-1', 'NY-1']) {
+    const nyStrict = runStatusJson(noYoloRoot, ['--prompt', prompt, '--no-yolo'])
+    assert.equal(nyStrict.gate.yolo, false)
+    assert.equal(nyStrict.preflight.hasConflict, true)
+    const reqConflict = nyStrict.preflight.conflicts.find((c) => c.kind === 'requirements-not-locked')
+    assert.ok(reqConflict)
+    assert.equal(reqConflict.options[0].command, '/carapace lock in the requirements for NY-1')
+  }
+
+  write(noYoloRoot, 'docs/ny-design.md', designDoc(['NY-1'], [['REQ-NY-1', 'Strict gate holds']]))
+  const nyLocked = runStatusJson(noYoloRoot, ['--prompt', 'run NY-1', '--no-yolo'])
+  assert.equal(nyLocked.requirements.status, 'LOCKED')
+  assert.deepEqual(nyLocked.preflight.conflicts, [])
+  assert.deepEqual(nyLocked.preflight.warnings, [])
+  assert.equal(runCli(CLI, ['--root', noYoloRoot, '--check']).status, 0)
+
+  const afterNowRoot = tempRepo()
+  initGitRepo(afterNowRoot)
+  write(afterNowRoot, 'package.json', JSON.stringify({ name: 'after-now-fixture', scripts: { test: 'node --test' } }))
+  write(afterNowRoot, 'apps/a/src/index.mjs', 'export const sliceA = () => true\n')
+  write(afterNowRoot, 'apps/b/src/index.mjs', 'export const sliceB = () => true\n')
+  write(afterNowRoot, 'test/base.test.mjs', "import assert from 'node:assert/strict'\nassert.equal(true, true)\n")
+  write(afterNowRoot, '.execution-plan-integrity.json', configJson('backend'))
+  write(
+    afterNowRoot,
+    'docs/gate-design.md',
+    designDoc(['BASE-0', 'GATE-1', 'SLICE-A', 'SLICE-B'], [
+      ['REQ-BASE-0', 'Base slice exists'],
+      ['REQ-GATE-1', 'Validation gate closes first'],
+      ['REQ-SLICE-A', 'Slice A stays isolated'],
+      ['REQ-SLICE-B', 'Slice B stays isolated'],
+    ]),
+  )
+  write(
+    afterNowRoot,
+    'docs/execution-plan.md',
+    planDoc('GATE-1', [
+      '| 1 | `BASE-0` | `IMPLEMENTATION` | `DONE` | Bootstrapped apps. | Completed 2026-11-26; docs/execution-proofs/BASE-0.json. |',
+      '| 2 | `GATE-1` | `VALIDATION` | `NOW` | Run baseline validation gate. | docs/gate-design.md |',
+      '| 3 | `SLICE-A` | `IMPLEMENTATION` | `QUEUED` | Update apps/a/src/index.mjs handler. | docs/gate-design.md |',
+      '| 4 | `SLICE-B` | `IMPLEMENTATION` | `QUEUED` | Update apps/b/src/index.mjs handler. | docs/gate-design.md |',
+    ]),
+  )
+  write(
+    afterNowRoot,
+    'docs/execution-proofs/BASE-0.json',
+    implProof({
+      taskId: 'BASE-0',
+      reqId: 'REQ-BASE-0',
+      sourcePath: 'docs/gate-design.md',
+      sourceAnchor: 'REQ-BASE-0',
+      implPath: 'apps/a/src/index.mjs',
+      symbol: 'sliceA',
+      consumerPath: 'test/base.test.mjs',
+    }),
+  )
+  commitAll(afterNowRoot, 'init after-now fixture')
+
+  assert.equal(runCli(CLI, ['--root', afterNowRoot, '--check']).status, 0)
+  const afterNowStatus = runStatusJson(afterNowRoot)
+  assert.equal(afterNowStatus.fanoutAnalysis.mode, 'after-now')
+  assert.equal(afterNowStatus.fanoutAnalysis.prerequisiteId, 'GATE-1')
+  assert.deepEqual(afterNowStatus.fanoutAnalysis.parallelIds, ['SLICE-A', 'SLICE-B'])
+  assert.equal(afterNowStatus.nextPrompt, '/carapace run GATE-1')
+  assert.equal(afterNowStatus.options[0].command, '/carapace run GATE-1')
+  const prematureFanout = runStatusJson(afterNowRoot, ['--prompt', 'run SLICE-A SLICE-B in parallel'])
+  const seqConflict = prematureFanout.preflight.conflicts.find(
+    (c) => c.kind === 'sequential-prerequisite-before-fanout',
+  )
+  assert.ok(seqConflict)
+  assert.equal(seqConflict.options[0].command, '/carapace run GATE-1')
+  assert.equal(seqConflict.options[0].recommended, true)
+
+  const jsoncRoot = tempRepo()
+  initGitRepo(jsoncRoot)
+  write(jsoncRoot, 'package.json', JSON.stringify({ name: 'jsonc-fixture', scripts: { test: 'node --test' } }))
+  write(jsoncRoot, 'src/index.mjs', 'export const jsoncOk = () => true\n')
+  write(jsoncRoot, 'test/index.test.mjs', "import assert from 'node:assert/strict'\nassert.equal(true, true)\n")
+  write(
+    jsoncRoot,
+    '.execution-plan-integrity.json',
+    [
+      '// JSONC config fixture',
+      '{',
+      `  "$schema": "${SCHEMA_REF}",`,
+      '  /*',
+      '   * Multi-line block comment for backend profile',
+      '   */',
+      '  "schema": 2,',
+      '  "canonical": "docs/execution-plan.md",',
+      '  "profile": "backend", // trailing comment',
+      '  "completionProofs": { "directory": "docs/execution-proofs" },',
+      '  "requiredGlobs": ["docs/**/*plan*.md", "docs/**/*audit*.md"],',
+      '  "roles": {',
+      '    "evidence": ["docs/**/*audit*.md"],',
+      '    "validation": ["docs/**/*validation*.md"],',
+      '    "design": ["docs/**/*design*.md"],',
+      '    "archive": ["docs/archive/**/*.md"]',
+      '  }',
+      '}',
+      '',
+    ].join('\n'),
+  )
+  write(
+    jsoncRoot,
+    'docs/jsonc-design.md',
+    designDoc(['JSONC-0', 'JSONC-1'], [
+      ['REQ-JSONC-0', 'JSONC base holds'],
+      ['REQ-JSONC-1', 'JSONC config parses cleanly'],
+    ]),
+  )
+  write(
+    jsoncRoot,
+    'docs/execution-plan.md',
+    planDoc('JSONC-1', [
+      '| 1 | `JSONC-0` | `IMPLEMENTATION` | `DONE` | Bootstrapped JSONC fixture. | Completed 2026-11-26; docs/execution-proofs/JSONC-0.json. |',
+      '| 2 | `JSONC-1` | `IMPLEMENTATION` | `NOW` | Validate JSONC parsing in src/index.mjs. | docs/jsonc-design.md |',
+    ]),
+  )
+  write(
+    jsoncRoot,
+    'docs/execution-proofs/JSONC-0.json',
+    implProof({
+      taskId: 'JSONC-0',
+      reqId: 'REQ-JSONC-0',
+      sourcePath: 'docs/jsonc-design.md',
+      sourceAnchor: 'REQ-JSONC-0',
+      implPath: 'src/index.mjs',
+      symbol: 'jsoncOk',
+      consumerPath: 'test/index.test.mjs',
+    }),
+  )
+  commitAll(jsoncRoot, 'init JSONC fixture')
+
+  assert.equal(runCli(CHECKER_CLI, ['--root', jsoncRoot]).status, 0)
+  assert.equal(runCli(CLI, ['--root', jsoncRoot, '--check']).status, 0)
+  const jsoncStatus = runStatusJson(jsoncRoot)
+  assert.equal(jsoncStatus.initialized, true)
+  assert.equal(jsoncStatus.capabilities.profile, 'backend')
+  assert.equal(jsoncStatus.capabilities.profileSource, 'config')
+  assert.deepEqual(jsoncStatus.capabilities.drift, [])
+  assert.equal(jsoncStatus.preflight.hasConflict, false)
+
+  write(
+    jsoncRoot,
+    '.execution-plan-integrity.json',
+    '{\n  "schema": 2,\n  /* unterminated block comment\n  "canonical": "docs/execution-plan.md"\n}\n',
+  )
+  assert.notEqual(runCli(CHECKER_CLI, ['--root', jsoncRoot]).status, 0)
 })

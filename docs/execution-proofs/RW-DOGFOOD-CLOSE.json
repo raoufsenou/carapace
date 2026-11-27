@@ -1,0 +1,145 @@
+{
+  "schema": 1,
+  "taskId": "RW-DOGFOOD-CLOSE",
+  "taskKind": "VALIDATION",
+  "outcome": "VALIDATED",
+  "completedAt": "2026-11-27",
+  "requirements": [
+    {
+      "id": "REQ-RW-14",
+      "statement": "Dogfooded Carapace configuration and end-to-end fixture validation",
+      "source": {
+        "path": "docs/rework-hardening-design.md",
+        "anchor": "REQ-RW-14"
+      },
+      "evidence": [
+        {
+          "path": ".execution-plan-integrity.json",
+          "symbol": "\"$schema\": \"./skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json\""
+        },
+        {
+          "path": ".execution-plan-integrity.json",
+          "symbol": "\"profile\": \"backend\""
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "end-to-end CLI fixture validation covers dogfood root, docs-only, backend, fullstack, --no-yolo, after-now, and JSONC (REQ-RW-14)"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "assert.equal(dogfood.capabilities.profile, 'backend')"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "assert.equal(docsStatus.capabilities.profile, 'docs-only')"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "assert.equal(backendStatus.capabilities.profile, 'backend')"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "assert.equal(fullstackStatus.capabilities.profile, 'fullstack')"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "const nyStrict = runStatusJson(noYoloRoot, ['--prompt', prompt, '--no-yolo'])"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "assert.equal(afterNowStatus.fanoutAnalysis.mode, 'after-now')"
+        },
+        {
+          "path": "skills/carapace/assets/status.test.mjs",
+          "symbol": "assert.equal(jsoncStatus.capabilities.profileSource, 'config')"
+        },
+        {
+          "path": "skills/execution-plan-integrity/tests/config.test.mjs",
+          "symbol": "published JSON Schema stays in parity with check-execution-plan constants and validates root config (REQ-RW-12)"
+        }
+      ],
+      "verification": [
+        {
+          "kind": "test",
+          "command": "node --test skills/carapace/assets/status.test.mjs skills/execution-plan-integrity/tests/config.test.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node skills/carapace/assets/status.mjs --root . --check",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "inspection",
+          "evidence": "Observed node skills/carapace/assets/status.mjs --root . --json returning capabilities.profile='backend', capabilities.profileSource='config', capabilities.drift=[], appProfile.suggestedProfile='backend', uiAudit=false, devServer=false, nonUiAudit=true, fanoutWorktrees=true, and testGates=true.",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        },
+        {
+          "kind": "test",
+          "command": "node scripts/verify.mjs",
+          "result": "passed",
+          "checkedAt": "2026-11-27"
+        }
+      ]
+    }
+  ],
+  "implementationLedger": [
+    ".execution-plan-integrity.json",
+    "skills/carapace/assets/status.test.mjs"
+  ],
+  "integration": [
+    {
+      "entryPoint": "node skills/carapace/assets/status.mjs --root . --check and --json",
+      "implementation": ".execution-plan-integrity.json#\"profile\": \"backend\"",
+      "consumer": "skills/carapace/assets/status.test.mjs#assert.deepEqual(dogfood.capabilities.drift, [])"
+    },
+    {
+      "entryPoint": "node --test skills/execution-plan-integrity/tests/config.test.mjs",
+      "implementation": ".execution-plan-integrity.json#\"$schema\": \"./skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json\"",
+      "consumer": "skills/execution-plan-integrity/tests/config.test.mjs#published JSON Schema stays in parity with check-execution-plan constants and validates root config (REQ-RW-12)"
+    },
+    {
+      "entryPoint": "node scripts/verify.mjs",
+      "implementation": "skills/carapace/assets/status.test.mjs#end-to-end CLI fixture validation covers dogfood root, docs-only, backend, fullstack, --no-yolo, after-now, and JSONC (REQ-RW-14)",
+      "consumer": "scripts/verify.mjs#'skills/carapace/assets/status.test.mjs'"
+    }
+  ],
+  "falsification": [
+    {
+      "assertion": "Capability gating rejects disallowed workflows in docs-only and backend fixtures (bare audit, UI audit, parallel fan-out, dev server) while accepting proceed-without bypass commands without looping and allowing valid workflows.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs invokes status.mjs CLI against temp docs-only, backend, and fullstack git repos, asserting capability-disabled conflicts, bypass clearing, and valid prompt acceptance.",
+      "result": "passed"
+    },
+    {
+      "assertion": "Strict --no-yolo blocks unlocked task runs (both 'run NY-1' and bare 'NY-1') until a locked design doc exists; after-now blocks premature parallel execution with sequential-prerequisite-before-fanout; uncommitted capability changes raise uncommitted-capability-change without sidecar files while leaving verify unblocked; and unterminated JSONC block comments fail validation.",
+      "kind": "test",
+      "evidence": "skills/carapace/assets/status.test.mjs invokes status.mjs and check-execution-plan.mjs CLIs against temp --no-yolo, after-now, fullstack, and JSONC git repos, verifying every refusal and recovery transition.",
+      "result": "passed"
+    }
+  ],
+  "implementationDisposition": {
+    "status": "TRACKED",
+    "taskIds": [
+      "RW-VERIFY-FLOOR",
+      "RW-FANOUT-REQ",
+      "RW-PREFLIGHT-CORE",
+      "RW-HOOKS-INSTALL",
+      "RW-SCHEMA-CAP"
+    ]
+  },
+  "unverified": [],
+  "outOfScope": [
+    "Running live scripts/install.mjs --replace (or any live install/uninstall) against maintainer harness homes (~/.claude, ~/.config/opencode, ~/.codex, ~/.cursor) remains manual per D-REWORK-HARDENING; automated verification runs temporary-directory installer tests only.",
+    "Creating git commits or merging rework into main remains deferred to explicit maintainer instruction."
+  ],
+  "closedRow": "| 13 | `RW-DOGFOOD-CLOSE` | `VALIDATION` | `NOW` | Configure Carapace's `.execution-plan-integrity.json` profile to eliminate UI drift, run end-to-end fixture verification (`docs-only`, `backend`, `fullstack`, `--no-yolo`, `after-now`, JSONC), and verify `status.mjs --root . --check` and the unified verification command pass (live harness install/replace stays manual per maintainer direction). Closes when all checks and fixtures pass with zero drift. | `D-REWORK-HARDENING` REQ-RW-14. |",
+  "notes": [
+    "Root .execution-plan-integrity.json now declares $schema (./skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json) and profile backend, bringing Carapace root capability drift to 0 while passing config.test.mjs schema validation.",
+    "End-to-end CLI fixture validation lives in skills/carapace/assets/status.test.mjs so JS_TEST_SUITES in scripts/verify.mjs preserves its 10-suite contract and executes all REQ-RW-14 fixtures on every verify run.",
+    "All edits remain uncommitted on disk per maintainer direction, and no live user harness directory was touched."
+  ]
+}

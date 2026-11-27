@@ -1,6 +1,8 @@
 {
+  "$schema": "./skills/execution-plan-integrity/assets/execution-plan-integrity.schema.json",
   "schema": 2,
   "canonical": "docs/execution-plan.md",
+  "profile": "backend",
   "completionProofs": {
     "directory": "docs/execution-proofs"
   },
